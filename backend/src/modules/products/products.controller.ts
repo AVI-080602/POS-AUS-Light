@@ -12,6 +12,9 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ProductsService } from './products.service';
 import { MagentoService } from '../sync/magento.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RoleNames } from '../auth/decorators/roles.decorator';
+import { Product } from './entities/product.entity';
 
 // Whitelist of Magento custom_attributes to show as "specifications".
 // Everything not in this list is considered internal / boring metadata.
@@ -101,6 +104,22 @@ export class ProductsController {
     private readonly magentoService: MagentoService,
   ) {}
 
+  // Cost is commercially sensitive — only managers/admins see it. Every
+  // endpoint below that touches `cost` gates it through this check.
+  private canSeeCost(user: any): boolean {
+    const roleName = user?.role?.name;
+    return roleName === RoleNames.MANAGER || roleName === RoleNames.ADMIN;
+  }
+
+  // findOne/findByBarcode/findBySku return the raw TypeORM entity rather
+  // than a hand-mapped DTO (unlike findAll/detail below) — strip `cost`
+  // for anyone who isn't allowed to see it.
+  private hideCostIfNeeded(product: Product, canSeeCost: boolean): Product {
+    if (canSeeCost) return product;
+    const { cost, ...rest } = product;
+    return rest as Product;
+  }
+
   @Get()
   @ApiOperation({ summary: 'Search and list products' })
   async findAll(
@@ -109,6 +128,7 @@ export class ProductsController {
     @Query('inStock') inStock?: boolean,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @CurrentUser() user?: any,
   ) {
     const { products, total } = await this.productsService.findAll({
       search,
@@ -117,6 +137,7 @@ export class ProductsController {
       page,
       limit,
     });
+    const canSeeCost = this.canSeeCost(user);
 
     return {
       success: true,
@@ -138,9 +159,11 @@ export class ProductsController {
           specialPriceTo: p.specialPriceTo,
           isOnSale: p.isOnSale,
           effectivePrice: p.effectivePrice,
-          // Cost — used by the cart to warn when a trade discount drops
-          // the unit price below cost+30% (the minimum margin guard).
-          cost: p.cost != null ? parseFloat(p.cost.toString()) : null,
+          // Cost — manager/admin only. Used by the cart to warn when a
+          // sale drops the unit price below cost+20% (the minimum margin
+          // guard the backend also enforces on order creation).
+          cost:
+            canSeeCost && p.cost != null ? parseFloat(p.cost.toString()) : null,
           brand: p.brand || null,
           stockQty: p.stockQty,
           isInStock: p.isInStock,
@@ -191,7 +214,10 @@ export class ProductsController {
 
   @Get('barcode/:barcode')
   @ApiOperation({ summary: 'Lookup product by barcode' })
-  async findByBarcode(@Param('barcode') barcode: string) {
+  async findByBarcode(
+    @Param('barcode') barcode: string,
+    @CurrentUser() user?: any,
+  ) {
     const product = await this.productsService.findByBarcode(barcode);
     if (!product) {
       return {
@@ -202,13 +228,13 @@ export class ProductsController {
 
     return {
       success: true,
-      data: { product },
+      data: { product: this.hideCostIfNeeded(product, this.canSeeCost(user)) },
     };
   }
 
   @Get('sku/:sku')
   @ApiOperation({ summary: 'Lookup product by SKU' })
-  async findBySku(@Param('sku') sku: string) {
+  async findBySku(@Param('sku') sku: string, @CurrentUser() user?: any) {
     const product = await this.productsService.findBySku(sku);
     if (!product) {
       return {
@@ -219,13 +245,13 @@ export class ProductsController {
 
     return {
       success: true,
-      data: { product },
+      data: { product: this.hideCostIfNeeded(product, this.canSeeCost(user)) },
     };
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get product by ID' })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  async findOne(@Param('id', ParseIntPipe) id: number, @CurrentUser() user?: any) {
     const product = await this.productsService.findById(id);
     if (!product) {
       return {
@@ -236,7 +262,7 @@ export class ProductsController {
 
     return {
       success: true,
-      data: { product },
+      data: { product: this.hideCostIfNeeded(product, this.canSeeCost(user)) },
     };
   }
 
@@ -244,9 +270,10 @@ export class ProductsController {
   @ApiOperation({
     summary: 'Get product detail with live specs + gallery from Magento',
   })
-  async detail(@Param('id', ParseIntPipe) id: number) {
+  async detail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user?: any) {
     const product = await this.productsService.findById(id);
     if (!product) throw new NotFoundException('Product not found');
+    const canSeeCost = this.canSeeCost(user);
 
     let specs: Array<{ code: string; label: string; value: string }> = [];
     let gallery: string[] = [];
@@ -314,7 +341,10 @@ export class ProductsController {
           specialPrice: product.specialPrice
             ? parseFloat(product.specialPrice.toString())
             : null,
-          cost: product.cost != null ? parseFloat(product.cost.toString()) : null,
+          cost:
+            canSeeCost && product.cost != null
+              ? parseFloat(product.cost.toString())
+              : null,
           brand: product.brand || null,
           specialPriceFrom: product.specialPriceFrom,
           specialPriceTo: product.specialPriceTo,

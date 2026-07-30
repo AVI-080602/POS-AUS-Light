@@ -816,7 +816,6 @@ export default function POSPage() {
         canStackDiscounts={canStackDiscounts}
         stockMap={{}}
         costMap={costMap}
-        customerIsTrade={cart.customerIsTrade}
         onRemoveItem={(productId) => dispatch(removeItem(productId))}
         onUpdateQuantity={(productId, qty) =>
           dispatch(updateQuantity({ productId, quantity: qty }))

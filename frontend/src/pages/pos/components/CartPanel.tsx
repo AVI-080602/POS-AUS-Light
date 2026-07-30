@@ -29,12 +29,13 @@ interface CartPanelProps {
   // Trade auto-discount % keyed by productId — used to render the yellow
   // "Trade $X" tag next to each line's unit price.
   tradePctMap?: Record<number, number>;
-  // Wholesale cost keyed by productId. When customerIsTrade is true and
-  // a line's unit price falls below cost * 1.30, the cart shows an
-  // "Below cost price" warning under that line. Purely informational —
-  // does not block the sale.
+  // Wholesale cost keyed by productId (manager/admin only — the backend
+  // omits it from the product API for other roles, so this map is simply
+  // empty for them). When a line's actual sell price falls below
+  // cost * 1.20, the cart shows a "Below cost price" warning. The backend
+  // hard-blocks the sale on checkout for sales_staff; managers/admins can
+  // still complete it.
   costMap?: Record<number, number>;
-  customerIsTrade?: boolean;
   onRemoveItem: (productId: number) => void;
   onUpdateQuantity: (productId: number, quantity: number) => void;
   onSetItemDiscount: (productId: number, discountPercent: number) => void;
@@ -58,7 +59,6 @@ export default function CartPanel({
   stockMap = {},
   tradePctMap = {},
   costMap = {},
-  customerIsTrade = false,
   onRemoveItem,
   onUpdateQuantity,
   onSetItemDiscount,
@@ -515,20 +515,23 @@ export default function CartPanel({
                           <span>Only {stock} in stock</span>
                         </div>
                       )}
-                      {/* Below-cost warning — trade customers only.
-                          The minimum margin is cost + 30%; falling below
-                          that just warns the cashier, never blocks the sale. */}
+                      {/* Below-cost warning — applies to every customer.
+                          The minimum margin is cost + 20%; the backend
+                          hard-blocks checkout at this threshold for
+                          sales_staff (managers/admins can override). Uses
+                          the actual per-unit sell price (rowTotal / qty),
+                          not the pre-discount unitPrice. */}
                       {(() => {
-                        if (!customerIsTrade) return null;
                         const cost = costMap[item.productId];
                         if (!cost || cost <= 0) return null;
-                        const floor = cost * 1.3;
-                        if (item.unitPrice >= floor) return null;
+                        const floor = cost * 1.2;
+                        const sellPrice = item.rowTotal / item.quantity;
+                        if (sellPrice >= floor) return null;
                         return (
                           <div className="mt-2 flex items-center gap-1 text-red-400 text-xs">
                             <ExclamationTriangleIcon className="h-4 w-4" />
                             <span>
-                              You are below cost price (min ${floor.toFixed(2)} = cost ${cost.toFixed(2)} + 30%)
+                              Below cost price (min ${floor.toFixed(2)} = cost ${cost.toFixed(2)} + 20%)
                             </span>
                           </div>
                         );

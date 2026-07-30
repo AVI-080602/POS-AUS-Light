@@ -232,10 +232,17 @@ export class OrdersController {
     },
     @CurrentUser() user: any,
   ) {
+    const userRole = {
+      id: user.role.id,
+      name: user.role.name,
+      maxDiscountPercent: parseFloat(user.role.maxDiscountPercent),
+      canStackDiscounts: user.role.canStackDiscounts,
+    };
     const order = await this.ordersService.updateItems(
       id,
       user.id,
       body?.items || [],
+      userRole,
     );
     return { success: true, data: { order } };
   }

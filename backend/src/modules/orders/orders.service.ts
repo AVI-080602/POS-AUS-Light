@@ -204,6 +204,9 @@ export class OrdersService {
             discountPercent: manualDiscount,
             manualDiscountPercent: manualDiscount,
             isSaleItem: false,
+            // Custom items have no catalogue cost — nothing to enforce
+            // the cost+20% floor against.
+            cost: null as number | null,
           };
         }
         const product = products.find((p) => p.id === item.productId);
@@ -262,9 +265,31 @@ export class OrdersService {
           manualDiscountPercent: manualDiscount,
           // Clearance items are excluded from the cart-level discount.
           isSaleItem: product.isOnSale,
+          cost: product.cost != null ? Number(product.cost) : null,
         };
       }),
     );
+
+    // Minimum-margin guard: the price the customer actually pays per unit
+    // (list price net of the effective discount) can't undercut cost+20%.
+    // Managers/admins may override; sales_staff cannot. Checked against
+    // the final per-unit sell price, not the pre-discount unitPrice.
+    const costFloorErrors = this.discountsService.checkCostFloor(
+      cartItems.map((c) => ({
+        sku: c.sku,
+        name: c.name,
+        unitPrice: c.unitPrice * (1 - c.discountPercent / 100),
+        cost: c.cost,
+      })),
+      userRole,
+    );
+    if (costFloorErrors.length > 0) {
+      throw new BadRequestException({
+        code: 'BELOW_COST_FLOOR',
+        message: 'One or more items are priced below the minimum allowed margin.',
+        errors: costFloorErrors,
+      });
+    }
 
     // Validate discounts. Trade auto-discount is company policy (not a
     // discretionary cashier override) so it bypasses the role-cap
@@ -1060,6 +1085,7 @@ export class OrdersService {
       sku?: string;
       name?: string;
     }>,
+    userRole: UserRole,
   ): Promise<Order> {
     const openStatuses = new Set<OrderStatus>([
       OrderStatus.PENDING,
@@ -1105,6 +1131,7 @@ export class OrdersService {
         let name = item.name || 'Custom Item';
         let unitPrice: number;
         let productId: number | null = null;
+        let cost: number | null = null;
 
         if (item.isCustom || item.productId <= 0) {
           const p = Number(item.unitPrice);
@@ -1124,6 +1151,7 @@ export class OrdersService {
           sku = product.sku;
           name = product.name;
           productId = product.id;
+          cost = product.cost != null ? Number(product.cost) : null;
           const base = product.isOnSale
             ? Number(product.specialPrice)
             : Number(product.price);
@@ -1136,6 +1164,18 @@ export class OrdersService {
         }
 
         const discountPct = Math.max(0, Math.min(100, item.discountPercent || 0));
+
+        const floorErrors = this.discountsService.checkCostFloor(
+          [{ sku, name, unitPrice: unitPrice * (1 - discountPct / 100), cost }],
+          userRole,
+        );
+        if (floorErrors.length > 0) {
+          throw new BadRequestException({
+            code: 'BELOW_COST_FLOOR',
+            message: floorErrors[0].message,
+          });
+        }
+
         const lineGross = unitPrice * qty;
         const lineDiscount = Math.round(lineGross * (discountPct / 100) * 100) / 100;
         const rowTotal = Math.round((lineGross - lineDiscount) * 100) / 100;

@@ -8,6 +8,7 @@ import {
   CartDiscountDto,
 } from './dto/validate-discount.dto';
 import { ConfigService } from '@nestjs/config';
+import { RoleNames } from '../auth/decorators/roles.decorator';
 
 export interface DiscountValidationResult {
   isValid: boolean;
@@ -230,6 +231,46 @@ export class DiscountsService {
       calculatedTotals,
       auditEntries,
     };
+  }
+
+  /**
+   * Minimum-margin guard: an item can't be sold for less than cost + 20%.
+   * Managers/admins may override; sales_staff cannot. Skips items with no
+   * known cost (unmatched SKUs, custom items) — nothing to enforce against.
+   * Deliberately omits the cost/floor figures from the returned errors so a
+   * sales_staff request can never learn the cost via the response.
+   */
+  private static readonly MIN_MARGIN_MULTIPLIER = 1.2;
+
+  checkCostFloor(
+    items: Array<{
+      sku: string;
+      name?: string;
+      unitPrice: number;
+      cost?: number | null;
+    }>,
+    userRole: UserRole,
+  ): DiscountError[] {
+    if (
+      userRole.name === RoleNames.MANAGER ||
+      userRole.name === RoleNames.ADMIN
+    ) {
+      return [];
+    }
+
+    const errors: DiscountError[] = [];
+    for (const item of items) {
+      if (item.cost == null || item.cost <= 0) continue;
+      const floor = item.cost * DiscountsService.MIN_MARGIN_MULTIPLIER;
+      if (item.unitPrice < floor) {
+        errors.push({
+          code: 'BELOW_COST_FLOOR',
+          message: `"${item.name || item.sku}" is priced below the minimum allowed margin — ask a manager or admin to proceed.`,
+          field: `items.${item.sku}.unitPrice`,
+        });
+      }
+    }
+    return errors;
   }
 
   /**
