@@ -208,6 +208,16 @@ export default function ProductDetailModal({
                   </span>
                 );
               })()}
+              {/* Cost — only present when the API returned it (manager/admin
+                  only; the backend strips it for sales_staff). */}
+              {product.cost != null && (
+                <span
+                  className="text-xs font-bold px-2 py-0.5 rounded bg-gray-600/30 text-gray-300 border border-gray-500/40"
+                  title="Supplier cost (ex GST)"
+                >
+                  Cost ${Number(product.cost).toFixed(2)}
+                </span>
+              )}
               <span
                 className={`px-2 py-0.5 rounded text-xs font-medium ${
                   product.isInStock
