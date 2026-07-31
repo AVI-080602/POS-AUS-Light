@@ -37,33 +37,44 @@ async function importCostPrices() {
   await dataSource.initialize();
   console.log(`✅ Connected to ${process.env.DB_DATABASE}@${process.env.DB_HOST}\n`);
 
+  // Commit in small batches rather than one transaction for all 6,777
+  // rows — this is a live production database taking concurrent orders,
+  // and a single long-running transaction holds row locks on every
+  // touched product until final commit, which can starve/timeout other
+  // queries (an order-creation request hit exactly this: "Lock wait
+  // timeout exceeded"). Batching bounds how long any given row stays
+  // locked to roughly one batch's worth of statements.
+  const BATCH_SIZE = 200;
   const queryRunner = dataSource.createQueryRunner();
   await queryRunner.connect();
-  await queryRunner.startTransaction();
 
   let updated = 0;
   const notFound: string[] = [];
 
-  try {
-    for (const { sku, cost } of rows) {
-      if (!sku || !Number.isFinite(cost)) continue;
-      const result = await queryRunner.query(
-        'UPDATE products SET cost = ? WHERE sku = ?',
-        [cost, sku],
-      );
-      if (result.affectedRows > 0) {
-        updated++;
-      } else {
-        notFound.push(sku);
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    await queryRunner.startTransaction();
+    try {
+      for (const { sku, cost } of batch) {
+        if (!sku || !Number.isFinite(cost)) continue;
+        const result = await queryRunner.query(
+          'UPDATE products SET cost = ? WHERE sku = ?',
+          [cost, sku],
+        );
+        if (result.affectedRows > 0) {
+          updated++;
+        } else {
+          notFound.push(sku);
+        }
       }
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
     }
-    await queryRunner.commitTransaction();
-  } catch (err) {
-    await queryRunner.rollbackTransaction();
-    throw err;
-  } finally {
-    await queryRunner.release();
+    console.log(`  ...${Math.min(i + BATCH_SIZE, rows.length)}/${rows.length}`);
   }
+  await queryRunner.release();
 
   console.log(`✅ Updated: ${updated}`);
   console.log(`⚠️  Not found in products table: ${notFound.length}`);
