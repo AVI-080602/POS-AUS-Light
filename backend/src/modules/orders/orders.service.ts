@@ -205,7 +205,7 @@ export class OrdersService {
             manualDiscountPercent: manualDiscount,
             isSaleItem: false,
             // Custom items have no catalogue cost — nothing to enforce
-            // the cost+20% floor against.
+            // the cost+30% floor against.
             cost: null as number | null,
           };
         }
@@ -271,7 +271,7 @@ export class OrdersService {
     );
 
     // Minimum-margin guard: the price the customer actually pays per unit
-    // (list price net of the effective discount) can't undercut cost+20%.
+    // (list price net of the effective discount) can't undercut cost+30%.
     // Managers/admins may override; sales_staff cannot. Checked against
     // the final per-unit sell price, not the pre-discount unitPrice.
     const costFloorErrors = this.discountsService.checkCostFloor(

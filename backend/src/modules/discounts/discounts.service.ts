@@ -234,13 +234,14 @@ export class DiscountsService {
   }
 
   /**
-   * Minimum-margin guard: an item can't be sold for less than cost + 20%.
+   * Minimum-margin guard: an item can't be sold for less than cost + 30%
+   * (per Sally's spec in the POS feedback sheet).
    * Managers/admins may override; sales_staff cannot. Skips items with no
    * known cost (unmatched SKUs, custom items) — nothing to enforce against.
    * Deliberately omits the cost/floor figures from the returned errors so a
    * sales_staff request can never learn the cost via the response.
    */
-  private static readonly MIN_MARGIN_MULTIPLIER = 1.2;
+  private static readonly MIN_MARGIN_MULTIPLIER = 1.3;
 
   checkCostFloor(
     items: Array<{

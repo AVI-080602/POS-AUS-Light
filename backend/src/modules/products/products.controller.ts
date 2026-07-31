@@ -160,7 +160,7 @@ export class ProductsController {
           isOnSale: p.isOnSale,
           effectivePrice: p.effectivePrice,
           // Cost — manager/admin only. Used by the cart to warn when a
-          // sale drops the unit price below cost+20% (the minimum margin
+          // sale drops the unit price below cost+30% (the minimum margin
           // guard the backend also enforces on order creation).
           cost:
             canSeeCost && p.cost != null ? parseFloat(p.cost.toString()) : null,
