@@ -60,6 +60,13 @@ interface InvoiceData {
   deferredSubtotal?: number;
   salesPerson?: string;
   notes?: string;
+  // Exchange metadata — set when this sale replaces goods returned on
+  // an earlier order. creditApplied is the store credit consumed by
+  // this sale; refundDueToCustomer is what's left over when the return
+  // was worth MORE than the replacement and has to be paid back.
+  exchangeFromOrderNumber?: string;
+  creditApplied?: number;
+  refundDueToCustomer?: number;
 }
 
 interface InvoiceModalProps {
@@ -373,6 +380,21 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                   <td style={totLabel}>INCLUDES GST:</td>
                   <td style={totVal()}>{money(invoice.taxAmount)}</td>
                 </tr>
+                {/* Exchange: credit taken off this sale, and any cash
+                    difference owed back when the returned goods were
+                    worth more than the replacement. */}
+                {invoice.exchangeFromOrderNumber && (
+                  <tr>
+                    <td style={totLabel}>EXCHANGE OF:</td>
+                    <td style={totVal()}>{invoice.exchangeFromOrderNumber}</td>
+                  </tr>
+                )}
+                {invoice.creditApplied != null && invoice.creditApplied > 0 && (
+                  <tr>
+                    <td style={totLabel}>CREDIT APPLIED:</td>
+                    <td style={totVal()}>-{money(invoice.creditApplied)}</td>
+                  </tr>
+                )}
                 <tr>
                   <td style={{ ...totLabel, fontWeight: 800, color: INK, paddingTop: '12px' }}>BALANCE:</td>
                   <td
@@ -386,6 +408,25 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                     {money(showDeposit ? invoice.balanceDue! : invoice.grandTotal)}
                   </td>
                 </tr>
+                {invoice.refundDueToCustomer != null &&
+                  invoice.refundDueToCustomer > 0.01 && (
+                    <tr>
+                      <td
+                        style={{ ...totLabel, fontWeight: 800, color: INK }}
+                      >
+                        REFUND DUE TO CUSTOMER:
+                      </td>
+                      <td
+                        style={{
+                          ...totVal(true),
+                          color: ORANGE,
+                          fontSize: '16px',
+                        }}
+                      >
+                        -{money(invoice.refundDueToCustomer)}
+                      </td>
+                    </tr>
+                  )}
                 {invoice.cashTendered != null && (
                   <>
                     <tr>

@@ -815,6 +815,18 @@ export default function PaymentModal({
         salesPerson: user
           ? [user.firstName, user.lastName].filter(Boolean).join(' ')
           : undefined,
+        // Exchange trail. When the returned goods were worth MORE than
+        // the replacement, the leftover credit is money we owe back —
+        // surface it on the invoice so the cashier pays it out instead
+        // of leaving it sitting on the account.
+        exchangeFromOrderNumber: cart.exchangeFromOrderNumber || undefined,
+        creditApplied: creditApplied > 0 ? creditApplied : undefined,
+        refundDueToCustomer: cart.exchangeFromOrderId
+          ? Math.max(
+              0,
+              Math.round((storeCreditBalance - creditApplied) * 100) / 100,
+            )
+          : undefined,
       };
 
       // Show the invoice FIRST, then clear the draft. The order is
