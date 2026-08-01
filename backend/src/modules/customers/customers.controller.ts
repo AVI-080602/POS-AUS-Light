@@ -116,6 +116,41 @@ export class CustomersController {
     };
   }
 
+  @Post(':id/store-credit/cash-out')
+  @ApiOperation({
+    summary:
+      'Pay leftover store credit out to the customer as cash. Used when an exchange is cheaper than the returned item and the difference has to go back over the counter.',
+  })
+  async cashOutStoreCredit(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { amount: number; note?: string },
+    @CurrentUser() user: any,
+  ) {
+    const result = await this.storeCreditService.cashOut(
+      id,
+      Number(body.amount),
+      user.id,
+      body.note,
+    );
+    return {
+      success: true,
+      data: {
+        balance: result.balance,
+        paidOut: Math.abs(
+          parseFloat(result.transaction.amount.toString()),
+        ),
+        transaction: {
+          id: result.transaction.id,
+          type: result.transaction.type,
+          amount: parseFloat(result.transaction.amount.toString()),
+          balanceAfter: parseFloat(result.transaction.balanceAfter.toString()),
+          note: result.transaction.note,
+          createdAt: result.transaction.createdAt,
+        },
+      },
+    };
+  }
+
   @Post(':id/store-credit/adjust')
   @ApiOperation({
     summary:

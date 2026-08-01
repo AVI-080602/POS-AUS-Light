@@ -242,10 +242,13 @@ export class RefundsService {
     }
   }
 
+  // `items.orderItem` is eager-loaded so callers can show WHAT was
+  // refunded (name/sku/price), not just an orderItemId — Sally: "It's
+  // not showing what has been refunded, can we have more information".
   async findByOrder(orderId: number): Promise<Refund[]> {
     return this.refundRepository.find({
       where: { orderId },
-      relations: ['items', 'user'],
+      relations: ['items', 'items.orderItem', 'user'],
       order: { createdAt: 'DESC' },
     });
   }

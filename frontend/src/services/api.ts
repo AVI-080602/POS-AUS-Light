@@ -90,6 +90,11 @@ export const customersApi = {
   adjustStoreCredit: (id: number, data: { amount: number; note: string }) =>
     api.post(`/customers/${id}/store-credit/adjust`, data),
 
+  // Hand leftover credit back as cash — used when an exchange is
+  // cheaper than the returned item and the difference must be paid out.
+  cashOutStoreCredit: (id: number, data: { amount: number; note?: string }) =>
+    api.post(`/customers/${id}/store-credit/cash-out`, data),
+
   updateCustomer: (id: number, data: any) => api.put(`/customers/${id}`, data),
 
   mergeDuplicates: () => api.post('/customers/merge-duplicates'),

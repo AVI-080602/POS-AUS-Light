@@ -1156,6 +1156,41 @@ export default function OrdersPage() {
                               </span>
                             ))}
                           </div>
+                          {/* Exactly what came back, so a partial refund
+                              is readable without opening the receipt. */}
+                          {(r.items || []).length > 0 && (
+                            <ul className="mb-2 mt-1 space-y-0.5">
+                              {r.items.map((ri: any) => (
+                                <li
+                                  key={ri.id}
+                                  className="flex justify-between text-xs text-gray-300"
+                                >
+                                  <span>
+                                    {ri.quantity}
+                                    {ri.originalQuantity
+                                      ? ` of ${ri.originalQuantity}`
+                                      : ''}{' '}
+                                    × {ri.name || `Item #${ri.orderItemId}`}
+                                    {ri.sku ? (
+                                      <span className="text-gray-500 font-mono">
+                                        {' '}
+                                        {ri.sku}
+                                      </span>
+                                    ) : null}
+                                    {ri.restock ? (
+                                      <span className="text-gray-500">
+                                        {' '}
+                                        · restocked
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                  <span className="font-medium">
+                                    ${Number(ri.amount).toFixed(2)}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                           <div className="text-xs text-gray-400">
                             Reason: {REFUND_REASONS.find((x) => x.value === r.reason)?.label || r.reason}
                             {cleanReason ? ` — "${cleanReason}"` : ''}
@@ -1727,6 +1762,79 @@ export default function OrdersPage() {
                 </div>
               )}
             </div>
+
+            {/* The whole original order, with what's come back marked.
+                Sally: "on the receipt can it display the whole order
+                that was brought and display what was refunded, and this
+                continues if another exchange refund occurs". Prior
+                refunds are folded in so the running picture is right on
+                the second and third visit. */}
+            {(() => {
+              const orderItems = completedRefund.order?.items || [];
+              if (orderItems.length === 0) return null;
+              // qty refunded BEFORE this refund, per order item
+              const priorQty: Record<number, number> = {};
+              for (const r of completedRefund.order?.refunds || []) {
+                if (r.id === completedRefund.refund.id) continue;
+                for (const ri of r.items || []) {
+                  priorQty[ri.orderItemId] =
+                    (priorQty[ri.orderItemId] || 0) + Number(ri.quantity || 0);
+                }
+              }
+              // qty refunded by THIS refund
+              const nowQty: Record<number, number> = {};
+              for (const ri of completedRefund.refund.items || []) {
+                nowQty[ri.orderItemId] =
+                  (nowQty[ri.orderItemId] || 0) + Number(ri.quantity || 0);
+              }
+              return (
+                <div className="mb-4">
+                  <p className="text-sm font-semibold mb-2">
+                    Original Order — {completedRefund.order.orderNumber}
+                  </p>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {orderItems.map((oi: any) => {
+                        const prior = priorQty[oi.id] || 0;
+                        const now = nowQty[oi.id] || 0;
+                        const kept = Number(oi.quantity) - prior - now;
+                        return (
+                          <tr key={oi.id} className="border-b border-gray-200">
+                            <td className="py-1">
+                              {oi.quantity}x {oi.name}
+                              <div className="text-xs text-gray-600">
+                                {now > 0 && (
+                                  <span className="font-semibold">
+                                    {now} returned now
+                                  </span>
+                                )}
+                                {now > 0 && prior > 0 ? ' · ' : ''}
+                                {prior > 0 && (
+                                  <span>{prior} returned earlier</span>
+                                )}
+                                {(now > 0 || prior > 0) && kept > 0
+                                  ? ` · ${kept} kept`
+                                  : ''}
+                                {now === 0 && prior === 0 ? 'Kept' : ''}
+                              </div>
+                            </td>
+                            <td className="py-1 text-right align-top">
+                              ${Number(oi.rowTotal).toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <div className="flex justify-between text-sm mt-1 pt-1 border-t border-gray-300">
+                    <span>Order total</span>
+                    <span>
+                      ${parseFloat(completedRefund.order.grandTotal).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="mb-4">
               <p className="text-sm font-semibold mb-2">Refunded Items</p>

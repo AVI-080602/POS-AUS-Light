@@ -286,4 +286,51 @@ export class StoreCreditService implements OnModuleInit {
       return { balance: newBalance, transaction: savedTx };
     });
   }
+
+  /**
+   * Pay leftover store credit out to the customer in cash.
+   *
+   * The exchange case Sally hit: a $96 item comes back, the customer
+   * only wants a $7.96 replacement, and the $88.04 difference has to
+   * leave the till as cash rather than sit on the account as credit.
+   * The refund already issued the credit and the exchange order spent
+   * part of it, so this drains whatever is left.
+   *
+   * Recorded as a negative MANUAL_ADJUSTMENT tagged [CASH PAID OUT] so
+   * it shows in the credit history and reconciles against the till.
+   */
+  async cashOut(
+    customerId: number,
+    amount: number,
+    userId: number,
+    note?: string,
+  ): Promise<{ balance: number; transaction: StoreCreditTransaction }> {
+    const paidOut = this.round(Number(amount));
+    if (!Number.isFinite(paidOut) || paidOut <= 0) {
+      throw new BadRequestException('Cash-out amount must be greater than 0');
+    }
+    // Never let a cash-out overdraw the account — unlike manualAdjust,
+    // this one hands real money over the counter.
+    await this.assertSufficientBalance(customerId, paidOut);
+
+    return this.dataSource.transaction(async (manager) => {
+      const balance = await this.getOrCreateBalance(manager, customerId);
+      const newBalance = this.round(Number(balance.balance) - paidOut);
+      balance.balance = newBalance;
+      await manager.save(balance);
+
+      const tx = manager.create(StoreCreditTransaction, {
+        customerId,
+        type: StoreCreditTransactionType.MANUAL_ADJUSTMENT,
+        amount: -paidOut,
+        balanceAfter: newBalance,
+        userId,
+        note: `[CASH PAID OUT] ${note?.trim() || 'Refund of exchange difference'}`,
+        expiresAt: null,
+      } as Partial<StoreCreditTransaction>);
+      const savedTx = await manager.save(tx);
+
+      return { balance: newBalance, transaction: savedTx };
+    });
+  }
 }

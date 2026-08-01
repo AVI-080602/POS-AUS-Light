@@ -440,6 +440,14 @@ export class OrdersController {
             quantity: ri.quantity,
             amount: parseFloat(ri.amount.toString()),
             restock: ri.restock,
+            // Product identity so the refund history reads like a
+            // receipt instead of a list of row ids.
+            sku: ri.orderItem?.sku ?? null,
+            name: ri.orderItem?.name ?? null,
+            unitPrice: ri.orderItem
+              ? parseFloat(ri.orderItem.unitPrice.toString())
+              : null,
+            originalQuantity: ri.orderItem?.quantity ?? null,
           })),
         })),
       },
