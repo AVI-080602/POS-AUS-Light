@@ -78,6 +78,11 @@ export default function CustomersPage() {
   const [adjustAmount, setAdjustAmount] = useState('');
   const [adjustNote, setAdjustNote] = useState('');
   const [isAdjusting, setIsAdjusting] = useState(false);
+  // Cash-out: pay leftover credit back over the counter.
+  const [showCashOutModal, setShowCashOutModal] = useState(false);
+  const [cashOutAmount, setCashOutAmount] = useState('');
+  const [cashOutNote, setCashOutNote] = useState('');
+  const [isCashingOut, setIsCashingOut] = useState(false);
   const { user: currentAuthUser } = useSelector((state: RootState) => state.auth);
   const [customerOrders, setCustomerOrders] = useState<any[]>([]);
   const [customerOrdersPagination, setCustomerOrdersPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -204,6 +209,40 @@ export default function CustomersPage() {
       toast.error(e.response?.data?.message || 'Failed to adjust credit');
     } finally {
       setIsAdjusting(false);
+    }
+  };
+
+  // Hand leftover credit back as cash. The exchange case: a $96 item is
+  // returned, the replacement is only $7.96, and the $88.04 difference
+  // has to leave the till rather than sit on the account.
+  const handleCashOut = async () => {
+    if (!selectedCustomer) return;
+    const amount = parseFloat(cashOutAmount);
+    if (!amount || amount <= 0) {
+      toast.error('Enter an amount greater than 0');
+      return;
+    }
+    if (amount > storeCreditBalance + 0.01) {
+      toast.error(
+        `Only $${storeCreditBalance.toFixed(2)} of credit is available`,
+      );
+      return;
+    }
+    setIsCashingOut(true);
+    try {
+      await customersApi.cashOutStoreCredit(selectedCustomer.id, {
+        amount,
+        note: cashOutNote.trim() || undefined,
+      });
+      toast.success(`$${amount.toFixed(2)} paid out in cash`);
+      setShowCashOutModal(false);
+      setCashOutAmount('');
+      setCashOutNote('');
+      await refreshStoreCredit();
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || 'Failed to pay out credit');
+    } finally {
+      setIsCashingOut(false);
     }
   };
 
@@ -1094,12 +1133,31 @@ export default function CustomersPage() {
                     {/* Any signed-in staff can adjust — every change is
                         logged with amount + note + staff name in the
                         transactions table below. */}
-                    <button
-                      className="btn-secondary text-sm"
-                      onClick={() => setShowAdjustModal(true)}
-                    >
-                      Manual Adjust
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        className="btn-secondary text-sm"
+                        disabled={storeCreditBalance <= 0}
+                        title={
+                          storeCreditBalance <= 0
+                            ? 'No credit available to pay out'
+                            : 'Pay credit back to the customer as cash'
+                        }
+                        onClick={() => {
+                          // Default to the whole balance — the common
+                          // case is clearing the exchange difference.
+                          setCashOutAmount(storeCreditBalance.toFixed(2));
+                          setShowCashOutModal(true);
+                        }}
+                      >
+                        Pay Out Cash
+                      </button>
+                      <button
+                        className="btn-secondary text-sm"
+                        onClick={() => setShowAdjustModal(true)}
+                      >
+                        Manual Adjust
+                      </button>
+                    </div>
                   </div>
 
                   {storeCreditTxs.length === 0 ? (
@@ -1164,6 +1222,73 @@ export default function CustomersPage() {
                   )}
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cash out store credit — used when an exchange comes in under
+          the returned item's value and the difference has to be handed
+          back over the counter. */}
+      {showCashOutModal && selectedCustomer && (
+        <div className="modal-backdrop-top">
+          <div className="modal-content">
+            <div className="flex justify-between items-start mb-4">
+              <button
+                onClick={() => setShowCashOutModal(false)}
+                className="modal-back-btn"
+                disabled={isCashingOut}
+              >
+                <ArrowLeftIcon className="h-5 w-5" /> Back
+              </button>
+              <h3 className="text-lg font-bold">Pay Out Store Credit</h3>
+            </div>
+            <p className="text-sm text-gray-400 mb-4">
+              Hands credit back to the customer as cash and deducts it from
+              their balance. Available: ${storeCreditBalance.toFixed(2)}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Amount to pay out ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={storeCreditBalance}
+                  className="input"
+                  value={cashOutAmount}
+                  onChange={(e) => setCashOutAmount(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Note (optional)
+                </label>
+                <textarea
+                  className="input min-h-[60px]"
+                  placeholder="e.g. difference on exchange of order POS-0043"
+                  value={cashOutNote}
+                  onChange={(e) => setCashOutNote(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                className="btn-secondary"
+                onClick={() => setShowCashOutModal(false)}
+                disabled={isCashingOut}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleCashOut}
+                disabled={isCashingOut}
+              >
+                {isCashingOut ? 'Paying out…' : 'Pay Out Cash'}
+              </button>
             </div>
           </div>
         </div>
