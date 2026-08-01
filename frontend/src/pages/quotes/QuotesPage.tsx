@@ -83,6 +83,25 @@ export default function QuotesPage() {
   const [quoteBuyerType, setQuoteBuyerType] = useState<'trade' | 'customer'>('customer');
   const [editingQuoteId, setEditingQuoteId] = useState<number | null>(null);
 
+  // Inline "create new customer" panel for the quote modal. Previously
+  // the quote could only attach an existing customer, so a brand-new
+  // walk-in had nowhere to go (Sally: "Can not add another new customer
+  // doesn't create the quote").
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
+  const emptyNewCustomer = {
+    firstName: '',
+    lastName: '',
+    email: '',
+    phone: '',
+    company: '',
+    billingStreet: '',
+    billingCity: '',
+    billingState: '',
+    billingPostcode: '',
+  };
+  const [newCustomer, setNewCustomer] = useState({ ...emptyNewCustomer });
+
   // Convert / cancel / print state
   const [convertData, setConvertData] = useState<any>(null); // { quote, check }
   const [isConverting, setIsConverting] = useState(false);
@@ -362,8 +381,56 @@ export default function QuotesPage() {
     }
   };
 
+  // Create a customer straight from the quote modal and attach them to
+  // the quote being built. Trade quotes flag the customer as trade so
+  // the auto trade rates apply from here on.
+  const handleCreateCustomerForQuote = async () => {
+    if (!newCustomer.firstName.trim()) {
+      setCreateError('Customer first name is required');
+      return;
+    }
+    if (newCustomer.phone && !/^\d{10}$/.test(newCustomer.phone.replace(/\D/g, ''))) {
+      setCreateError('Phone number must be 10 digits');
+      return;
+    }
+    setCreateError('');
+    setIsCreatingCustomer(true);
+    try {
+      const res = await customersApi.createCustomer({
+        firstName: newCustomer.firstName.trim(),
+        lastName: newCustomer.lastName.trim() || undefined,
+        email: newCustomer.email.trim() || undefined,
+        phone: newCustomer.phone.trim() || undefined,
+        company: newCustomer.company.trim() || undefined,
+        billingStreet: newCustomer.billingStreet.trim() || undefined,
+        billingCity: newCustomer.billingCity.trim() || undefined,
+        billingState: newCustomer.billingState.trim() || undefined,
+        billingPostcode: newCustomer.billingPostcode.trim() || undefined,
+        isTrade: quoteBuyerType === 'trade',
+      });
+      const created = res.data?.data?.customer ?? res.data?.data ?? res.data;
+      setSelectedCustomer(created);
+      setShowNewCustomer(false);
+      setNewCustomer({ ...emptyNewCustomer });
+      setCustomerSearch('');
+      setCustSearchName('');
+      setCustSearchEmail('');
+      setCustSearchPhone('');
+      setCustomerResults([]);
+      toast.success('Customer created');
+    } catch (error: any) {
+      setCreateError(
+        error.response?.data?.message || 'Failed to create customer',
+      );
+    } finally {
+      setIsCreatingCustomer(false);
+    }
+  };
+
   const resetCreateForm = () => {
     setSelectedCustomer(null);
+    setShowNewCustomer(false);
+    setNewCustomer({ ...emptyNewCustomer });
     setCustomerSearch('');
     setCustSearchName('');
     setCustSearchEmail('');
@@ -898,7 +965,155 @@ export default function QuotesPage() {
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mb-2">Start typing in any field — results appear below</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-gray-500">
+                      Start typing in any field — results appear below
+                    </p>
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-primary-400 hover:text-primary-300"
+                      onClick={() => setShowNewCustomer((v) => !v)}
+                    >
+                      {showNewCustomer ? 'Cancel new customer' : '+ Create new customer'}
+                    </button>
+                  </div>
+
+                  {/* New-customer form — first/last name split, address
+                      fields, and Company Name for trade buyers. */}
+                  {showNewCustomer && (
+                    <div className="bg-pos-accent border border-gray-600 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-semibold mb-3">
+                        New {quoteBuyerType === 'trade' ? 'Trade' : 'Customer'} Details
+                      </p>
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            First Name *
+                          </label>
+                          <input
+                            type="text"
+                            className="input"
+                            value={newCustomer.firstName}
+                            onChange={(e) =>
+                              setNewCustomer({ ...newCustomer, firstName: e.target.value })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Last Name
+                          </label>
+                          <input
+                            type="text"
+                            className="input"
+                            value={newCustomer.lastName}
+                            onChange={(e) =>
+                              setNewCustomer({ ...newCustomer, lastName: e.target.value })
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      {quoteBuyerType === 'trade' && (
+                        <div className="mb-3">
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Company Name
+                          </label>
+                          <input
+                            type="text"
+                            className="input w-full"
+                            value={newCustomer.company}
+                            onChange={(e) =>
+                              setNewCustomer({ ...newCustomer, company: e.target.value })
+                            }
+                          />
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Phone</label>
+                          <input
+                            type="tel"
+                            className="input"
+                            placeholder="10 digits"
+                            value={newCustomer.phone}
+                            onChange={(e) =>
+                              setNewCustomer({
+                                ...newCustomer,
+                                // Digits only — staff kept typing letters here.
+                                phone: e.target.value.replace(/\D/g, '').slice(0, 10),
+                              })
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">Email</label>
+                          <input
+                            type="email"
+                            className="input"
+                            value={newCustomer.email}
+                            onChange={(e) =>
+                              setNewCustomer({ ...newCustomer, email: e.target.value })
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <label className="block text-xs text-gray-400 mb-1">Address</label>
+                      <input
+                        type="text"
+                        className="input w-full mb-2"
+                        placeholder="Street address"
+                        value={newCustomer.billingStreet}
+                        onChange={(e) =>
+                          setNewCustomer({ ...newCustomer, billingStreet: e.target.value })
+                        }
+                      />
+                      <div className="grid grid-cols-3 gap-3 mb-3">
+                        <input
+                          type="text"
+                          className="input"
+                          placeholder="Suburb / City"
+                          value={newCustomer.billingCity}
+                          onChange={(e) =>
+                            setNewCustomer({ ...newCustomer, billingCity: e.target.value })
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="input"
+                          placeholder="State"
+                          value={newCustomer.billingState}
+                          onChange={(e) =>
+                            setNewCustomer({ ...newCustomer, billingState: e.target.value })
+                          }
+                        />
+                        <input
+                          type="text"
+                          className="input"
+                          placeholder="Postcode"
+                          value={newCustomer.billingPostcode}
+                          onChange={(e) =>
+                            setNewCustomer({
+                              ...newCustomer,
+                              billingPostcode: e.target.value.replace(/\D/g, '').slice(0, 4),
+                            })
+                          }
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-primary w-full"
+                        disabled={isCreatingCustomer}
+                        onClick={handleCreateCustomerForQuote}
+                      >
+                        {isCreatingCustomer ? 'Creating…' : 'Create & Add Customer'}
+                      </button>
+                    </div>
+                  )}
+
                   {customerSearch.length >= 2 && (
                     <div className="bg-pos-accent border border-gray-600 rounded-lg max-h-48 overflow-auto">
                       {customerSearchLoading && (
