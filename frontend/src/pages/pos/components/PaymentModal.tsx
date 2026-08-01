@@ -817,13 +817,19 @@ export default function PaymentModal({
           : undefined,
       };
 
-      // Order committed — the draft has served its purpose, wipe it so
-      // the next cashier / next order starts clean.
-      clearDraft();
-
+      // Show the invoice FIRST, then clear the draft. The order is
+      // already committed at this point, so if clearDraft() ever throws
+      // (storage quota, disabled localStorage) the cashier must still
+      // get their invoice — losing it would mean re-keying a sale that
+      // has already taken money.
       setInvoiceData(invoice);
       setShowInvoice(true);
-
+      try {
+        clearDraft();
+      } catch (draftErr) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to clear checkout draft:', draftErr);
+      }
     } catch (error: any) {
       // Dig through NestJS's error envelope to find something human-readable.
       const body = error?.response?.data;
@@ -837,6 +843,11 @@ export default function PaymentModal({
         error?.message ||
         'Failed to process payment';
       toast.error(String(msg).slice(0, 300));
+    } finally {
+      // Always drop out of the processing state. Previously this only
+      // ran in the catch, so the success path left isProcessing stuck
+      // at true — after closing the invoice on a part payment the modal
+      // came back permanently spinning with no way forward.
       setIsProcessing(false);
     }
   };
