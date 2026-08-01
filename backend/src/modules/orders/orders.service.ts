@@ -215,18 +215,36 @@ export class OrdersService {
             `Product ${item.productId} not found`,
           );
         }
+        // Trade auto-discount is resolved first because the base-price
+        // choice below depends on what the trade rate actually works out to.
+        const manualDiscount = item.discountPercent || 0;
+        const autoDiscount =
+          isTradeOrder && !dto.trustItemUnitPrices
+            ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
+            : 0;
+
         // Base price selection:
         //   - Retail customers on a SALE item: use special price.
-        //   - Trade customers: ALWAYS use the fixed retail price, even
-        //     when the item is on sale — the trade % is applied to
-        //     that base, so trade never stacks on top of the sale
-        //     discount. Client asked for trade to be off retail only.
+        //   - Trade customers: normally the fixed retail price, even when
+        //     the item is on sale — the trade % applies to that base, so
+        //     trade never stacks on top of the sale discount (trade off
+        //     retail only).
+        //   - EXCEPT when that lands ABOVE what a walk-in would pay on a
+        //     deep sale. Sally: "If Trade price is dearer than the
+        //     customer price, an automatic rule that customer price is
+        //     taken than Trade". In that case we drop to the retail/sale
+        //     price and skip the trade auto-discount entirely.
         const isOnSale = product.isOnSale;
+        const retailNet = isOnSale
+          ? Number(product.specialPrice)
+          : Number(product.price);
+        const tradeNet = Number(product.price) * (1 - autoDiscount / 100);
+        const tradeWins = !isTradeOrder || tradeNet <= retailNet;
         const effective = isTradeOrder
-          ? Number(product.price)
-          : isOnSale
-            ? Number(product.specialPrice)
-            : Number(product.price);
+          ? tradeWins
+            ? Number(product.price)
+            : retailNet
+          : retailNet;
         // Honour a per-line unitPrice override when:
         //   1. the line is a backorder (catalogue may be $0 / out of date), OR
         //   2. the caller is trusted (dto.trustItemUnitPrices) — used by
@@ -242,16 +260,13 @@ export class OrdersService {
           Number(item.unitPrice) >= 0
             ? Number(item.unitPrice)
             : parseFloat(effective.toString());
-        // Trade auto-discount: applied as a floor when the order is for
-        // a trade customer and the caller isn't the quote-conversion
-        // path (which already baked in the trade rate). The cashier's
-        // manual discount only takes effect if it's higher.
-        const manualDiscount = item.discountPercent || 0;
-        const autoDiscount =
-          isTradeOrder && !dto.trustItemUnitPrices
-            ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
-            : 0;
-        const effectiveDiscount = Math.max(manualDiscount, autoDiscount);
+        // Trade auto-discount acts as a floor: the cashier's manual
+        // discount only takes effect if it's higher. Zeroed when the
+        // sale price already beat the trade rate (see tradeWins above) —
+        // the base is the sale price there, so re-applying trade % on
+        // top would double-discount.
+        const appliedAutoDiscount = tradeWins ? autoDiscount : 0;
+        const effectiveDiscount = Math.max(manualDiscount, appliedAutoDiscount);
         return {
           productId: item.productId,
           sku: product.sku,

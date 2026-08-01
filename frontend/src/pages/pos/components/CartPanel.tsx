@@ -10,6 +10,7 @@ import {
   TagIcon,
   ExclamationTriangleIcon,
   MagnifyingGlassIcon,
+  PencilSquareIcon,
 } from '@heroicons/react/24/outline';
 import toast from 'react-hot-toast';
 import { CartItem, CartDiscount } from '../../../store/slices/cartSlice';
@@ -348,16 +349,44 @@ export default function CartPanel({
                           }}
                         />
                       ) : (
-                        <button
-                          className="text-sm hover:text-primary-400"
-                          title="Click to edit unit price"
-                          onClick={() => {
-                            setEditingUnitPrice(item.productId);
-                            setUnitPriceInput(item.unitPrice.toFixed(2));
-                          }}
-                        >
-                          ${item.unitPrice.toFixed(2)}
-                        </button>
+                        (() => {
+                          // Show the struck-through list price next to the
+                          // net price whenever a discount is applied, so the
+                          // cashier sees what the customer actually pays
+                          // without opening the discount box.
+                          const effective = Math.max(
+                            item.discountPercent || 0,
+                            item.autoDiscountPercent || 0,
+                          );
+                          const netPrice =
+                            Math.round(
+                              item.unitPrice * (1 - effective / 100) * 100,
+                            ) / 100;
+                          return (
+                            <button
+                              className="text-sm hover:text-primary-400 flex items-center gap-1.5"
+                              title="Click to edit unit price"
+                              onClick={() => {
+                                setEditingUnitPrice(item.productId);
+                                setUnitPriceInput(item.unitPrice.toFixed(2));
+                              }}
+                            >
+                              {effective > 0 ? (
+                                <>
+                                  <span className="text-gray-500 line-through">
+                                    ${item.unitPrice.toFixed(2)}
+                                  </span>
+                                  <span className="font-semibold text-green-400">
+                                    ${netPrice.toFixed(2)}
+                                  </span>
+                                </>
+                              ) : (
+                                <span>${item.unitPrice.toFixed(2)}</span>
+                              )}
+                              <PencilSquareIcon className="h-3 w-3 text-gray-500" />
+                            </button>
+                          );
+                        })()
                       )}
                       {(() => {
                         const pct = tradePctMap[item.productId] || 0;

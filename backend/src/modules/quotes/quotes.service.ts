@@ -108,14 +108,27 @@ export class QuotesService {
         throw new NotFoundException(`Product with ID ${item.productId} not found`);
       }
 
-      // Trade always prices off the fixed retail (product.price) even
+      // Resolve the trade rate first — the base-price choice depends on
+      // what it actually works out to. Mirrors orders.service.ts::create.
+      const autoTrade = isTrade
+        ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
+        : 0;
+
+      // Trade normally prices off the fixed retail (product.price) even
       // when the item is on sale — trade % is applied to that base,
-      // preventing a sale-plus-trade double discount.
+      // preventing a sale-plus-trade double discount. Exception: if the
+      // trade rate lands ABOVE what a walk-in would pay on a deep sale,
+      // the customer price wins and the trade % is dropped.
+      const retailNet = product.isOnSale
+        ? Number(product.specialPrice)
+        : Number(product.price);
+      const tradeNet = Number(product.price) * (1 - autoTrade / 100);
+      const tradeWins = !isTrade || tradeNet <= retailNet;
       const defaultPrice = isTrade
-        ? Number(product.price)
-        : product.isOnSale
-          ? Number(product.specialPrice)
-          : Number(product.price);
+        ? tradeWins
+          ? Number(product.price)
+          : retailNet
+        : retailNet;
       // Allow caller to override unit price (e.g. trade pricing on quotes)
       const unitPrice =
         item.unitPrice != null && item.unitPrice >= 0
@@ -127,11 +140,12 @@ export class QuotesService {
       const manualDiscount = item.discountPercent || 0;
       // Trade auto-discount is the floor; cashier override only wins
       // when it's higher. Keeps the trade customer's entitled rate even
-      // if the cashier forgets to apply anything.
-      const autoTrade = isTrade
-        ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
-        : 0;
-      const discountPercent = Math.max(manualDiscount, autoTrade);
+      // if the cashier forgets to apply anything. Zeroed when the sale
+      // price already beat trade — the base is the sale price there.
+      const discountPercent = Math.max(
+        manualDiscount,
+        tradeWins ? autoTrade : 0,
+      );
       const discountAmount = this.round(lineSubtotal * (discountPercent / 100));
       const lineAfterDiscount = lineSubtotal - discountAmount;
       // AU prices are GST-inclusive. Extract the GST component
@@ -237,13 +251,23 @@ export class QuotesService {
         throw new NotFoundException(`Product with ID ${item.productId} not found`);
       }
 
+      const autoTrade = isTrade
+        ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
+        : 0;
       // Trade: base off fixed retail (never the sale price) so trade
-      // % doesn't stack on top of the sale discount.
+      // % doesn't stack on top of the sale discount — unless the trade
+      // rate ends up dearer than the customer price, in which case the
+      // customer price wins and trade % is dropped.
+      const retailNet = product.isOnSale
+        ? Number(product.specialPrice)
+        : Number(product.price);
+      const tradeNet = Number(product.price) * (1 - autoTrade / 100);
+      const tradeWins = !isTrade || tradeNet <= retailNet;
       const defaultPrice = isTrade
-        ? Number(product.price)
-        : product.isOnSale
-          ? Number(product.specialPrice)
-          : Number(product.price);
+        ? tradeWins
+          ? Number(product.price)
+          : retailNet
+        : retailNet;
       const unitPrice =
         item.unitPrice != null && item.unitPrice >= 0
           ? Number(item.unitPrice)
@@ -251,10 +275,10 @@ export class QuotesService {
       const quantity = item.quantity;
       const lineSubtotal = unitPrice * quantity;
       const manualDiscount = item.discountPercent || 0;
-      const autoTrade = isTrade
-        ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
-        : 0;
-      const discountPercent = Math.max(manualDiscount, autoTrade);
+      const discountPercent = Math.max(
+        manualDiscount,
+        tradeWins ? autoTrade : 0,
+      );
       const discountAmount = this.round(lineSubtotal * (discountPercent / 100));
       const lineAfterDiscount = lineSubtotal - discountAmount;
       // AU prices are GST-inclusive — extract the component, don't add

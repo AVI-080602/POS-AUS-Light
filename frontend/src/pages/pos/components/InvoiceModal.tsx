@@ -156,6 +156,9 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
     takenQty: it.isBackorder || it.isLaybyHeld ? 0 : it.quantity,
     backorderQty: it.isBackorder ? it.quantity : 0,
     laybyQty: it.isLaybyHeld ? it.quantity : 0,
+    // Flag clearance/sale lines so the printed invoice shows why the
+    // price differs from the ticketed RRP.
+    isSale: !!it.isSaleItem,
   }));
 
   return (
@@ -306,6 +309,22 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                     {r.name}
                     {r.sku ? (
                       <span style={{ color: MUTED, fontSize: '11px' }}> — {r.sku}</span>
+                    ) : null}
+                    {r.isSale ? (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          padding: '1px 5px',
+                          border: `1px solid ${INK}`,
+                          borderRadius: 3,
+                          fontSize: '9px',
+                          fontWeight: 800,
+                          letterSpacing: '0.04em',
+                          verticalAlign: 'middle',
+                        }}
+                      >
+                        SALE
+                      </span>
                     ) : null}
                   </td>
                   <td style={td('right')}>{money(r.unitPrice)}</td>
