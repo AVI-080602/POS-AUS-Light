@@ -147,10 +147,19 @@ export class QuotesController {
       customerId?: number;
       notes?: string;
       allowBackorder?: boolean;
+      // How the converted order should be fulfilled. 'full' (default)
+      // is paid-and-taken; 'layby' holds the goods against a deposit;
+      // 'backorder' flags every line as coming from the supplier.
+      // Sally: "once the quote has been converted ... need options to
+      // add as layby or backorder".
+      fulfilment?: 'full' | 'layby' | 'backorder';
     },
     @CurrentUser() user: any,
   ) {
-    const allowBackorder = !!body.allowBackorder;
+    const fulfilment = body.fulfilment || 'full';
+    // A layby/backorder conversion is itself a deliberate "don't take
+    // the stock now" decision, so it implies the stock override.
+    const allowBackorder = !!body.allowBackorder || fulfilment !== 'full';
     if (allowBackorder && user.role.name !== 'admin' && user.role.name !== 'manager') {
       throw new ForbiddenException(
         'Only managers or admins may override stock checks',
@@ -215,6 +224,13 @@ export class QuotesController {
           quantity: i.quantity,
           discountPercent: i.discountPercent,
           unitPrice: i.unitPriceOverride,
+          // Layby holds the whole line on the shelf; backorder flags the
+          // whole line as coming from the supplier. Paid-in-full does
+          // neither and the goods walk out today.
+          isLaybyHeld: fulfilment === 'layby',
+          laybyHeldQty: fulfilment === 'layby' ? i.quantity : undefined,
+          isBackorder: fulfilment === 'backorder',
+          backorderQty: fulfilment === 'backorder' ? i.quantity : undefined,
         })),
         payments: body.payments,
         notes: body.notes || `Converted from quote ${quote.quoteNumber}`,

@@ -117,6 +117,12 @@ export default function QuotesPage() {
   const [convertPaymentMethod, setConvertPaymentMethod] = useState<'cash' | 'eftpos' | 'bank_transfer'>('eftpos');
   const [convertPaymentRef, setConvertPaymentRef] = useState('');
   const [allowBackorder, setAllowBackorder] = useState(false);
+  // How the converted order is fulfilled: paid & taken now, held on
+  // layby against a deposit, or ordered in from the supplier.
+  const [convertFulfilment, setConvertFulfilment] = useState<
+    'full' | 'layby' | 'backorder'
+  >('full');
+  const [convertDeposit, setConvertDeposit] = useState('');
   const [cancelConfirm, setCancelConfirm] = useState<any>(null);
   const [printingQuote, setPrintingQuote] = useState<any>(null);
   const [storeSettings, setStoreSettings] = useState<any>({});
@@ -479,6 +485,8 @@ export default function QuotesPage() {
       setConvertPaymentMethod('eftpos');
       setConvertPaymentRef('');
       setAllowBackorder(false);
+      setConvertFulfilment('full');
+      setConvertDeposit('');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to check quote');
     }
@@ -503,19 +511,36 @@ export default function QuotesPage() {
       return;
     }
 
+    // Paid-in-full takes the whole amount. Layby/backorder take only
+    // what the cashier collected up front (deposit); the balance stays
+    // owing on the order.
+    const typedDeposit = parseFloat(convertDeposit);
+    const amountNow =
+      convertFulfilment === 'full'
+        ? payable
+        : Number.isFinite(typedDeposit) && typedDeposit >= 0
+          ? Math.min(typedDeposit, payable)
+          : 0;
+
     setIsConverting(true);
     try {
       const res = await quotesApi.convertToOrder(quote.id, {
-        payments: [
-          {
-            method: convertPaymentMethod,
-            amount: payable,
-            reference: convertPaymentRef || undefined,
-            amountTendered:
-              convertPaymentMethod === 'cash' ? payable : undefined,
-          },
-        ],
+        // A zero deposit means no payment row at all, otherwise the
+        // order records a $0 payment against the till.
+        payments:
+          amountNow > 0
+            ? [
+                {
+                  method: convertPaymentMethod,
+                  amount: amountNow,
+                  reference: convertPaymentRef || undefined,
+                  amountTendered:
+                    convertPaymentMethod === 'cash' ? amountNow : undefined,
+                },
+              ]
+            : [],
         allowBackorder: allowBackorder && !!check.blockers.outOfStock,
+        fulfilment: convertFulfilment,
       });
       toast.success(`Converted to order ${res.data.data.order.orderNumber}`);
       setConvertData(null);
@@ -1527,6 +1552,77 @@ export default function QuotesPage() {
                   <span>${grandTotal.toFixed(2)}</span>
                 </div>
               </div>
+
+              {/* How this order is fulfilled — paid & taken, held on
+                  layby, or ordered in from the supplier. */}
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-2">
+                  Convert as
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'full', label: 'Pay in Full', hint: 'Goods taken now' },
+                      { id: 'layby', label: 'Lay By', hint: 'Deposit, held' },
+                      { id: 'backorder', label: 'Backorder', hint: 'From supplier' },
+                    ] as const
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className={`p-3 rounded-lg border-2 text-sm font-medium ${
+                        convertFulfilment === f.id
+                          ? 'border-primary-500 bg-primary-500/20'
+                          : 'border-gray-600'
+                      }`}
+                      onClick={() => {
+                        setConvertFulfilment(f.id);
+                        // Default the layby deposit to the 20% minimum.
+                        if (f.id === 'layby') {
+                          setConvertDeposit((grandTotal * 0.2).toFixed(2));
+                        } else if (f.id === 'backorder') {
+                          setConvertDeposit('');
+                        }
+                      }}
+                    >
+                      <div>{f.label}</div>
+                      <div className="text-[10px] text-gray-400 font-normal mt-0.5">
+                        {f.hint}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {convertFulfilment !== 'full' && (
+                <div className="mb-4">
+                  <label className="block text-sm text-gray-400 mb-1">
+                    {convertFulfilment === 'layby'
+                      ? 'Deposit taken now'
+                      : 'Deposit / part payment (optional)'}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    className="input"
+                    placeholder="0.00"
+                    value={convertDeposit}
+                    onChange={(e) => setConvertDeposit(e.target.value)}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Balance of $
+                    {Math.max(
+                      0,
+                      grandTotal - (parseFloat(convertDeposit) || 0),
+                    ).toFixed(2)}{' '}
+                    stays owing on the order.
+                    {convertFulfilment === 'layby' && (
+                      <> Minimum 20% deposit is ${(grandTotal * 0.2).toFixed(2)}.</>
+                    )}
+                  </p>
+                </div>
+              )}
 
               <div className="mb-4">
                 <label className="block text-sm text-gray-400 mb-2">Payment Method</label>

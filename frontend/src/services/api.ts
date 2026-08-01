@@ -227,6 +227,9 @@ export const quotesApi = {
       customerId?: number;
       notes?: string;
       allowBackorder?: boolean;
+      // 'full' pays and takes the goods now; 'layby' holds them against
+      // a deposit; 'backorder' orders every line from the supplier.
+      fulfilment?: 'full' | 'layby' | 'backorder';
     },
   ) => api.post(`/quotes/${id}/convert`, data),
 
