@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { settingsApi, syncApi } from '../../services/api';
+import { settingsApi, syncApi, productsApi } from '../../services/api';
 import {
   BuildingStorefrontIcon,
   CreditCardIcon,
@@ -9,6 +9,7 @@ import {
   ArrowPathIcon,
   ArrowLeftIcon,
   ScissorsIcon,
+  TagIcon,
 } from '@heroicons/react/24/outline';
 
 interface Role {
@@ -17,6 +18,17 @@ interface Role {
   displayName: string;
   maxDiscountPercent: number;
   canStackDiscounts: boolean;
+}
+
+// Mirrors the backend trade-rules.defaults.ts shape.
+interface TradeRule {
+  id: number;
+  label: string;
+  percent: number;
+  matchType: 'category' | 'all_except_prefix' | 'all';
+  categoryId?: number | null;
+  excludeNamePrefix?: string | null;
+  enabled: boolean;
 }
 
 // Mirrors the backend led-strip.defaults.ts shape.
@@ -46,7 +58,7 @@ const defaultTradingHours: TradingHours = {
 };
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<'store' | 'payments' | 'roles' | 'system' | 'sync' | 'ledstrip'>('store');
+  const [activeTab, setActiveTab] = useState<'store' | 'payments' | 'roles' | 'system' | 'sync' | 'ledstrip' | 'trade'>('store');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
@@ -88,6 +100,10 @@ export default function SettingsPage() {
   // LED strip cut-to-length rates (Strip Cut Counter). Editable here so
   // Sally can adjust strip/tail pricing without a deploy.
   const [stripProducts, setStripProducts] = useState<LedStripProduct[]>([]);
+
+  // Trade auto-discount rules — the % a trade customer gets off, and
+  // what each rule applies to.
+  const [tradeRules, setTradeRules] = useState<TradeRule[]>([]);
 
   // Sync state
   const [syncStatus, setSyncStatus] = useState<{
@@ -136,6 +152,10 @@ export default function SettingsPage() {
         case 'ledstrip':
           const stripRes = await settingsApi.getLedStripProducts();
           setStripProducts(stripRes.data.data.products || []);
+          break;
+        case 'trade':
+          const tradeRes = await productsApi.getTradeRules();
+          setTradeRules(tradeRes.data.data.rules || []);
           break;
         case 'sync':
           const statusRes = await syncApi.getStatus();
@@ -339,10 +359,47 @@ export default function SettingsPage() {
     );
   };
 
+  const handleSaveTradeRules = async () => {
+    setIsSaving(true);
+    setSaveMessage('');
+    try {
+      const res = await productsApi.updateTradeRules(tradeRules);
+      setTradeRules(res.data.data.rules || tradeRules);
+      setSaveMessage('Trade pricing rules saved successfully!');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error) {
+      setSaveMessage('Failed to save trade pricing rules');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const updateTradeRule = (
+    id: number,
+    field: keyof TradeRule,
+    value: string | boolean,
+  ) => {
+    setTradeRules((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        if (field === 'percent') {
+          const n = parseFloat(value as string);
+          return { ...r, percent: Number.isFinite(n) ? n : 0 };
+        }
+        if (field === 'categoryId') {
+          const n = parseInt(value as string, 10);
+          return { ...r, categoryId: Number.isFinite(n) ? n : null };
+        }
+        return { ...r, [field]: value } as TradeRule;
+      }),
+    );
+  };
+
   const tabs = [
     { id: 'store', label: 'Store', icon: BuildingStorefrontIcon },
     { id: 'payments', label: 'Payments', icon: CreditCardIcon },
     { id: 'roles', label: 'Roles', icon: UserGroupIcon },
+    { id: 'trade', label: 'Trade Pricing', icon: TagIcon },
     { id: 'ledstrip', label: 'LED Strip', icon: ScissorsIcon },
     { id: 'system', label: 'System', icon: Cog6ToothIcon },
     { id: 'sync', label: 'Magento Sync', icon: ArrowPathIcon },
@@ -732,6 +789,159 @@ export default function SettingsPage() {
                     full system access
                   </p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Trade auto-discount rules */}
+          {activeTab === 'trade' && (
+            <div className="space-y-6">
+              <div className="card p-6">
+                <h2 className="text-lg font-semibold mb-1">
+                  Trade Auto-Discount Rules
+                </h2>
+                <p className="text-sm text-gray-400 mb-4">
+                  What a trade customer automatically comes off retail. Only
+                  the single highest matching rule applies to a line — they
+                  don't stack. A cashier's manual discount only wins if it's
+                  larger. These mirror the Magento cart price rules.
+                </p>
+
+                <div className="space-y-4">
+                  {tradeRules.map((r) => (
+                    <div
+                      key={r.id}
+                      className={`border rounded-lg p-4 ${
+                        r.enabled
+                          ? 'bg-pos-accent/40 border-gray-700'
+                          : 'bg-pos-accent/10 border-gray-800 opacity-60'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex-1">
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Rule name
+                          </label>
+                          <input
+                            type="text"
+                            className="input w-full"
+                            value={r.label}
+                            onChange={(e) =>
+                              updateTradeRule(r.id, 'label', e.target.value)
+                            }
+                          />
+                        </div>
+                        <label className="flex items-center gap-2 text-sm mt-6 whitespace-nowrap">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4"
+                            checked={r.enabled}
+                            onChange={(e) =>
+                              updateTradeRule(r.id, 'enabled', e.target.checked)
+                            }
+                          />
+                          Active
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Discount %
+                          </label>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            max="100"
+                            className="input w-full"
+                            value={r.percent}
+                            onChange={(e) =>
+                              updateTradeRule(r.id, 'percent', e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Applies to
+                          </label>
+                          <select
+                            className="input w-full"
+                            value={r.matchType}
+                            onChange={(e) =>
+                              updateTradeRule(r.id, 'matchType', e.target.value)
+                            }
+                          >
+                            <option value="category">A category</option>
+                            <option value="all_except_prefix">
+                              Everything except a brand
+                            </option>
+                            <option value="all">Everything</option>
+                          </select>
+                        </div>
+                        <div>
+                          {r.matchType === 'category' && (
+                            <>
+                              <label className="block text-xs text-gray-400 mb-1">
+                                Category ID
+                              </label>
+                              <input
+                                type="number"
+                                className="input w-full"
+                                value={r.categoryId ?? ''}
+                                onChange={(e) =>
+                                  updateTradeRule(
+                                    r.id,
+                                    'categoryId',
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                              <p className="text-[11px] text-gray-500 mt-1">
+                                Includes all sub-categories
+                              </p>
+                            </>
+                          )}
+                          {r.matchType === 'all_except_prefix' && (
+                            <>
+                              <label className="block text-xs text-gray-400 mb-1">
+                                Exclude names starting with
+                              </label>
+                              <input
+                                type="text"
+                                className="input w-full"
+                                placeholder="e.g. eglo"
+                                value={r.excludeNamePrefix ?? ''}
+                                onChange={(e) =>
+                                  updateTradeRule(
+                                    r.id,
+                                    'excludeNamePrefix',
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs text-gray-500 mt-4">
+                  Note: trade prices off the fixed retail price, never on top
+                  of a sale price — except where the sale price is already
+                  cheaper than the trade price, in which case the customer
+                  price wins.
+                </p>
+
+                <button
+                  className="btn-primary mt-4"
+                  onClick={handleSaveTradeRules}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save Trade Pricing Rules'}
+                </button>
               </div>
             </div>
           )}

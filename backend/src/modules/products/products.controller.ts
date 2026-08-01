@@ -1,6 +1,8 @@
 import {
   Controller,
   Get,
+  Put,
+  Body,
   Param,
   Query,
   UseGuards,
@@ -13,8 +15,16 @@ import { ProductsService } from './products.service';
 import { MagentoService } from '../sync/magento.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { RoleNames } from '../auth/decorators/roles.decorator';
+import { Roles, RoleNames } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { Product } from './entities/product.entity';
+import { TradeDiscountsService } from './trade-discounts.service';
+import { SettingsService } from '../settings/settings.service';
+import { SettingType } from '../settings/entities/setting.entity';
+import {
+  DEFAULT_TRADE_RULES,
+  normaliseTradeRules,
+} from './trade-rules.defaults';
 
 // Whitelist of Magento custom_attributes to show as "specifications".
 // Everything not in this list is considered internal / boring metadata.
@@ -102,6 +112,8 @@ export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
     private readonly magentoService: MagentoService,
+    private readonly tradeDiscounts: TradeDiscountsService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   // Cost is commercially sensitive — only managers/admins see it. Every
@@ -183,6 +195,44 @@ export class ProductsController {
           totalPages: Math.ceil(total / (limit || 20)),
         },
       },
+    };
+  }
+
+  // Trade auto-discount rules. Declared before @Get(':id') so the path
+  // isn't swallowed by the id route. Read is manager/admin (they're the
+  // ones who can see margins anyway), write is admin only.
+  @Get('trade-rules')
+  @UseGuards(RolesGuard)
+  @Roles(RoleNames.ADMIN, RoleNames.MANAGER)
+  @ApiOperation({ summary: 'Get the trade auto-discount rules' })
+  async getTradeRules() {
+    const rules = await this.tradeDiscounts.getRules();
+    return { success: true, data: { rules, defaults: DEFAULT_TRADE_RULES } };
+  }
+
+  @Put('trade-rules')
+  @UseGuards(RolesGuard)
+  @Roles(RoleNames.ADMIN)
+  @ApiOperation({ summary: 'Update the trade auto-discount rules' })
+  async updateTradeRules(
+    @Body() dto: { rules?: unknown },
+    @CurrentUser() user: any,
+  ) {
+    const rules = normaliseTradeRules(dto?.rules);
+    await this.settingsService.set(
+      'trade_discount_rules',
+      rules,
+      SettingType.JSON,
+      'Trade customer auto-discount rules',
+      user?.id,
+    );
+    // Drop the cached copy so the next priced line uses the new rates
+    // immediately rather than waiting out the TTL.
+    this.tradeDiscounts.invalidateRulesCache();
+    return {
+      success: true,
+      message: 'Trade pricing rules updated successfully',
+      data: { rules },
     };
   }
 

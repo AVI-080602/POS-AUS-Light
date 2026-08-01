@@ -72,6 +72,11 @@ export const productsApi = {
 
   getSubcategories: (categoryId: number) =>
     api.get(`/products/categories/${categoryId}/subcategories`),
+
+  // Trade auto-discount rules (manager/admin read, admin write).
+  getTradeRules: () => api.get('/products/trade-rules'),
+  updateTradeRules: (rules: any[]) =>
+    api.put('/products/trade-rules', { rules }),
 };
 
 // Customers API

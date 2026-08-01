@@ -3,12 +3,18 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Category } from './entities/category.entity';
 import { Product } from './entities/product.entity';
+import { SettingsService } from '../settings/settings.service';
+import {
+  TradeRule,
+  DEFAULT_TRADE_RULES,
+  normaliseTradeRules,
+} from './trade-rules.defaults';
 
-// Mirrors the three Magento cart price rules Sally maintains for trade
-// customers (rule IDs 88, 89, 92). Hardcoded here so the POS can apply
-// the same discounts when a quote is built — no Magento round-trip per
-// cart change. If Sally adds/edits trade rules in Magento, this list
-// has to be edited too.
+// Trade auto-discounts mirror the Magento cart price rules Sally
+// maintains (rule IDs 88, 89, 92) so the POS can price a trade cart
+// without a Magento round-trip. The rules are data, loaded from the
+// `trade_discount_rules` setting and editable under Settings -> Trade
+// Pricing; trade-rules.defaults.ts holds the seed/fallback set.
 //
 // Resolution rule per line:
 //   - Pick the SINGLE highest matching auto discount (rules don't stack
@@ -17,46 +23,46 @@ import { Product } from './entities/product.entity';
 //   - The cashier's manual line discount overrides the auto one ONLY if
 //     it's higher; otherwise the auto value wins. So the trade customer
 //     always gets at least their entitled discount.
-type TradeRule = {
-  id: number;
-  label: string;
-  percent: number;
-  match: (ctx: { product: Product; categoryIds: Set<number> }) => boolean;
-};
-
-const SMART_HOME_ROOT_CATEGORY_ID = 24; // pos.categories.id, includes descendants
-const LED_ALU_PROFILE_CATEGORY_ID = 92; // pos.categories.id (no children today)
-
-const RULES: TradeRule[] = [
-  {
-    id: 88,
-    label: '10% off Smart Home (TRADE)',
-    percent: 10,
-    match: ({ categoryIds }) => categoryIds.has(SMART_HOME_ROOT_CATEGORY_ID),
-  },
-  {
-    id: 89,
-    label: '10% off LED Aluminium Profile (TRADE)',
-    percent: 10,
-    match: ({ categoryIds }) => categoryIds.has(LED_ALU_PROFILE_CATEGORY_ID),
-  },
-  {
-    id: 92,
-    label: '20% off all lighting minus Eglo (TRADE)',
-    percent: 20,
-    // "all lighting" is the entire catalogue minus the Eglo brand. Eglo
-    // products have no brand attribute synced so we identify them by
-    // the name starting with "Eglo " (matches all 663 hits in prod).
-    match: ({ product }) => !/^eglo\b/i.test(product.name),
-  },
-];
+const RULES_CACHE_TTL_MS = 60_000;
 
 @Injectable()
 export class TradeDiscountsService {
   constructor(
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
+    private readonly settingsService: SettingsService,
   ) {}
+
+  // Rules are read on every priced line, so cache them briefly rather
+  // than hitting settings per product. An admin edit takes effect
+  // within a minute without a restart.
+  private rulesCache: { rules: TradeRule[]; loadedAt: number } | null = null;
+
+  async getRules(): Promise<TradeRule[]> {
+    const now = Date.now();
+    if (this.rulesCache && now - this.rulesCache.loadedAt < RULES_CACHE_TTL_MS) {
+      return this.rulesCache.rules;
+    }
+    let rules: TradeRule[];
+    try {
+      const stored = await this.settingsService.getValue<any>(
+        'trade_discount_rules',
+        null,
+      );
+      rules = normaliseTradeRules(stored);
+    } catch {
+      // Never let a settings hiccup strip a trade customer's discount.
+      rules = DEFAULT_TRADE_RULES;
+    }
+    this.rulesCache = { rules, loadedAt: now };
+    return rules;
+  }
+
+  // Called after an admin saves new rules so the next priced line picks
+  // them up immediately instead of waiting out the TTL.
+  invalidateRulesCache(): void {
+    this.rulesCache = null;
+  }
 
   // Cache: smart-home root id → set of itself + all descendant ids.
   // Categories rarely change so we just memoise the first lookup; a
@@ -100,24 +106,41 @@ export class TradeDiscountsService {
   async getAutoDiscount(
     product: Product,
   ): Promise<{ percent: number; label: string | null }> {
-    const smartHomeIds = await this.getSubtreeIds(SMART_HOME_ROOT_CATEGORY_ID);
-
-    // Expand the matched rules' category checks against the product's
-    // category set. We treat smart-home as "in the subtree of 24".
-    const productCategoryIds = new Set<number>();
-    for (const c of product.categories || []) {
-      productCategoryIds.add(c.id);
-      // smart-home rule wants to match descendants too; do that by
-      // adding the root id when ANY of the product's categories falls
-      // inside the precomputed subtree.
-      if (smartHomeIds.has(c.id)) {
-        productCategoryIds.add(SMART_HOME_ROOT_CATEGORY_ID);
-      }
-    }
+    const rules = await this.getRules();
+    const productCategoryIds = new Set<number>(
+      (product.categories || []).map((c) => c.id),
+    );
+    const name = (product.name || '').trim().toLowerCase();
 
     let best: { percent: number; label: string } | null = null;
-    for (const rule of RULES) {
-      if (!rule.match({ product, categoryIds: productCategoryIds })) continue;
+    for (const rule of rules) {
+      if (!rule.enabled) continue;
+
+      let matches = false;
+      switch (rule.matchType) {
+        case 'category': {
+          if (rule.categoryId == null) break;
+          // Match the category itself OR anything beneath it, so naming
+          // a parent catches its children without listing them all.
+          const subtree = await this.getSubtreeIds(rule.categoryId);
+          matches = [...productCategoryIds].some((id) => subtree.has(id));
+          break;
+        }
+        case 'all_except_prefix': {
+          const prefix = (rule.excludeNamePrefix || '').toLowerCase();
+          // Whole-word prefix match so "Eglo" doesn't also exclude
+          // something like "Eglobe".
+          matches = prefix
+            ? !new RegExp(`^${prefix}\\b`, 'i').test(name)
+            : true;
+          break;
+        }
+        case 'all':
+          matches = true;
+          break;
+      }
+
+      if (!matches) continue;
       if (!best || rule.percent > best.percent) {
         best = { percent: rule.percent, label: rule.label };
       }
