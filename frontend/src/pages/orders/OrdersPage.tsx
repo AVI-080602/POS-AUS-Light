@@ -178,6 +178,9 @@ export default function OrdersPage() {
   const [laybyPayAmount, setLaybyPayAmount] = useState('');
   const [laybyPayMethod, setLaybyPayMethod] = useState<'cash' | 'eftpos' | 'bank_transfer' | 'store_credit'>('eftpos');
   const [laybyPayRef, setLaybyPayRef] = useState('');
+  // Printable receipt for a lay-by instalment, shown after the payment
+  // is recorded.
+  const [laybyReceipt, setLaybyReceipt] = useState<any>(null);
   const [isTakingLaybyPayment, setIsTakingLaybyPayment] = useState(false);
 
   const canManage =
@@ -494,10 +497,15 @@ export default function OrdersPage() {
 
   const openLaybyPay = async (order: Order) => {
     try {
-      const res = await ordersApi.getLaybyBalance(order.id);
-      const b = res.data.data as { grandTotal: number; paid: number; balance: number };
+      // Pull the full order alongside the balance so the payment screen
+      // can show what's actually on lay-by, not just the numbers.
+      const [balRes, orderRes] = await Promise.all([
+        ordersApi.getLaybyBalance(order.id),
+        ordersApi.getOrder(order.id),
+      ]);
+      const b = balRes.data.data as { grandTotal: number; paid: number; balance: number };
       setLaybyBalance(b);
-      setLaybyPayOrder(order);
+      setLaybyPayOrder(orderRes.data?.data?.order || order);
       setLaybyPayAmount(b.balance.toFixed(2));
       setLaybyPayMethod('eftpos');
       setLaybyPayRef('');
@@ -526,6 +534,25 @@ export default function OrdersPage() {
       } else {
         toast.success(`Payment of $${amount.toFixed(2)} recorded`);
       }
+      // Hand the cashier a printable receipt for the instalment rather
+      // than just closing — Sally: "Need a print button to print the
+      // payment, and invoice to show the part payment".
+      const priorPaid = laybyBalance?.paid ?? 0;
+      const total = laybyBalance?.grandTotal ?? 0;
+      setLaybyReceipt({
+        order: laybyPayOrder,
+        amount,
+        method: laybyPayMethod,
+        reference: laybyPayRef.trim() || null,
+        paidToDate: Math.round((priorPaid + amount) * 100) / 100,
+        balanceAfter: Math.max(
+          0,
+          Math.round((total - priorPaid - amount) * 100) / 100,
+        ),
+        grandTotal: total,
+        isFinal: newStatus === 'complete',
+        date: new Date().toISOString(),
+      });
       setLaybyPayOrder(null);
       fetchOrders();
     } catch (err: any) {
@@ -1269,6 +1296,49 @@ export default function OrdersPage() {
               </div>
             )}
 
+            {/* What's actually on this lay-by, so the cashier can check
+                the goods against the payment without leaving the screen. */}
+            {(laybyPayOrder as any).items?.length > 0 && (
+              <div className="bg-pos-dark rounded-lg p-4 mb-4">
+                <p className="text-xs text-gray-400 uppercase mb-2">
+                  Items on this Lay By
+                </p>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {(laybyPayOrder as any).items.map((it: any) => (
+                      <tr key={it.id} className="border-b border-gray-700 last:border-0">
+                        <td className="py-1.5">
+                          {it.quantity}× {it.name}
+                          <span className="text-xs text-gray-500 font-mono ml-1">
+                            {it.sku}
+                          </span>
+                          {it.isBackorder && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-cyan-600/30 text-cyan-300">
+                              BACKORDER
+                            </span>
+                          )}
+                          {it.isLaybyHeld && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-600/30 text-amber-300">
+                              HELD
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-1.5 text-right font-medium">
+                          ${Number(it.rowTotal).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {(laybyPayOrder as any).customer && (
+                  <p className="text-xs text-gray-400 mt-2">
+                    Customer: {(laybyPayOrder as any).customer.firstName}{' '}
+                    {(laybyPayOrder as any).customer.lastName || ''}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Amount</label>
@@ -1718,6 +1788,112 @@ export default function OrdersPage() {
                 disabled={isLinking}
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lay By instalment receipt (print view) */}
+      {laybyReceipt && (
+        <div className="modal-backdrop print:bg-white print:static">
+          <div className="modal-content bg-white text-black p-8 print:shadow-none printable-root">
+            <div className="text-center mb-4">
+              <h2 className="text-2xl font-bold">
+                {laybyReceipt.isFinal ? 'LAY BY FINAL PAYMENT' : 'LAY BY PAYMENT RECEIPT'}
+              </h2>
+              <p className="text-sm text-gray-600">Australian Lighting &amp; Fans</p>
+            </div>
+
+            <div className="border-t border-b border-gray-300 py-3 mb-4 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span>Order:</span>
+                <span className="font-medium">{laybyReceipt.order.orderNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Date:</span>
+                <span>{formatDate(laybyReceipt.date)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Method:</span>
+                <span className="capitalize">
+                  {String(laybyReceipt.method).replace('_', ' ')}
+                </span>
+              </div>
+              {laybyReceipt.reference && (
+                <div className="flex justify-between">
+                  <span>Reference:</span>
+                  <span>{laybyReceipt.reference}</span>
+                </div>
+              )}
+              {laybyReceipt.order.customer && (
+                <div className="flex justify-between">
+                  <span>Customer:</span>
+                  <span>
+                    {laybyReceipt.order.customer.firstName}{' '}
+                    {laybyReceipt.order.customer.lastName || ''}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {laybyReceipt.order.items?.length > 0 && (
+              <div className="mb-4">
+                <p className="text-sm font-semibold mb-2">Items on Lay By</p>
+                <table className="w-full text-sm">
+                  <tbody>
+                    {laybyReceipt.order.items.map((it: any) => (
+                      <tr key={it.id} className="border-b border-gray-200">
+                        <td className="py-1">
+                          {it.quantity}x {it.name}
+                        </td>
+                        <td className="py-1 text-right">
+                          ${Number(it.rowTotal).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="border-t border-gray-300 pt-3 mb-6 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span>Order total</span>
+                <span>${laybyReceipt.grandTotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-lg">
+                <span>Paid this visit</span>
+                <span>${laybyReceipt.amount.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Paid to date</span>
+                <span>${laybyReceipt.paidToDate.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between font-bold">
+                <span>Balance owing</span>
+                <span>${laybyReceipt.balanceAfter.toFixed(2)}</span>
+              </div>
+              {laybyReceipt.isFinal && (
+                <p className="text-xs text-gray-600 pt-2">
+                  Lay By paid in full — goods may be released to the customer.
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-3 print:hidden">
+              <button
+                className="btn-secondary flex-1"
+                onClick={() => setLaybyReceipt(null)}
+              >
+                Close
+              </button>
+              <button
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+                onClick={() => window.print()}
+              >
+                <PrinterIcon className="h-5 w-5" />
+                Print
               </button>
             </div>
           </div>
