@@ -51,7 +51,13 @@ interface QuoteLineItem {
   // no rule matches). Effective per-line discount = max(manual, auto).
   autoDiscountPercent?: number;
   autoDiscountLabel?: string | null;
+  // Supplier cost, only present for manager/admin (the products API
+  // strips it for sales staff). Drives the below-margin warning.
+  cost?: number | null;
 }
+
+// Minimum margin: an item shouldn't be quoted below cost + 30%.
+const MIN_MARGIN_MULTIPLIER = 1.3;
 
 export default function QuotesPage() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -284,6 +290,7 @@ export default function QuotesPage() {
         price: basePrice,
         quantity: 1,
         discountPercent: 0,
+        cost: product.cost != null ? Number(product.cost) : null,
       },
     ]);
     setProductSearch('');
@@ -1307,6 +1314,23 @@ export default function QuotesPage() {
                         <td className="px-3 py-2">
                           <p className="font-medium">{item.name}</p>
                           <p className="text-xs text-gray-400">{item.sku}</p>
+                          {/* Below-margin alert — fires on the net price
+                              after discount, so it catches both a typed
+                              price and a heavy trade discount. Only shows
+                              when cost is known (manager/admin). */}
+                          {(() => {
+                            if (!item.cost || item.cost <= 0) return null;
+                            const floor = item.cost * MIN_MARGIN_MULTIPLIER;
+                            const net =
+                              item.price * (1 - effectiveDiscount(item) / 100);
+                            if (net >= floor) return null;
+                            return (
+                              <p className="text-[11px] text-red-400 mt-1 font-semibold">
+                                ⚠ Below cost price — min ${floor.toFixed(2)}{' '}
+                                (cost ${item.cost.toFixed(2)} + 30%)
+                              </p>
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-2">
                           <input
