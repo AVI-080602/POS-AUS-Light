@@ -23,6 +23,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Role } from '../users/entities/role.entity';
 import { SettingType } from './entities/setting.entity';
+import {
+  DEFAULT_STRIP_PRODUCTS,
+  normaliseStripProducts,
+} from './led-strip.defaults';
 
 @ApiTags('settings')
 @Controller('settings')
@@ -275,6 +279,56 @@ export class SettingsController {
     return {
       success: true,
       message: 'System settings updated successfully',
+    };
+  }
+
+  // Cut-to-length LED strip rates. Readable by any signed-in staff
+  // member (the Strip Cut Counter needs them), editable by admins only.
+  // NOTE: must be declared before the @Put(':key') catch-all below.
+  @Get('led-strip')
+  @ApiOperation({ summary: 'Get the LED strip cut-to-length catalogue' })
+  async getLedStripProducts() {
+    const stored = await this.settingsService.getValue<any>(
+      'led_strip_products',
+      null,
+    );
+    return {
+      success: true,
+      data: { products: normaliseStripProducts(stored) },
+    };
+  }
+
+  @Put('led-strip')
+  @Roles(RoleNames.ADMIN)
+  @ApiOperation({ summary: 'Update the LED strip cut-to-length catalogue' })
+  async updateLedStripProducts(
+    @Body() dto: { products?: unknown },
+    @Request() req: any,
+  ) {
+    // Normalise before persisting so a bad payload can't poison the
+    // calculator for every till.
+    const products = normaliseStripProducts(dto?.products);
+    await this.settingsService.set(
+      'led_strip_products',
+      products,
+      SettingType.JSON,
+      'Cut-to-length LED strip rates (per metre, GST inclusive)',
+      req.user?.id,
+    );
+    return {
+      success: true,
+      message: 'LED strip pricing updated successfully',
+      data: { products },
+    };
+  }
+
+  @Get('led-strip/defaults')
+  @Roles(RoleNames.ADMIN)
+  @ApiOperation({ summary: 'Get the built-in LED strip catalogue (for reset)' })
+  getLedStripDefaults() {
+    return {
+      success: true,
+      data: { products: DEFAULT_STRIP_PRODUCTS },
     };
   }
 

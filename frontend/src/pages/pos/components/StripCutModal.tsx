@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   XMarkIcon,
   ScissorsIcon,
@@ -6,20 +6,23 @@ import {
   PaperAirplaneIcon,
   BoltIcon,
 } from '@heroicons/react/24/outline';
+import { settingsApi } from '../../../services/api';
 
-// Cut-to-length LED strip catalogue. Edit these entries to add products
-// or tweak rates — the modal reads everything from this array. Prices
-// are per metre GST-inclusive; trade rate applies when the cashier
-// flips the top-right pill.
+// Cut-to-length LED strip catalogue. Rates live in the `led_strip_products`
+// setting so an admin can edit them under Settings → LED Strip without a
+// deploy; the array below is only the fallback used when that request
+// fails. Prices are per metre GST-inclusive; the trade rate applies when
+// the cashier flips the top-right pill.
 interface StripProduct {
   id: string;
   name: string;
   retailPerM: number;
   tradePerM: number;
-  // Only cuttable at multiples of this many mm. e.g. 1000 = 1m cuts.
+  // Only cuttable at multiples of this many mm. 500 = 0.5m cuts, the
+  // standard interval for strip lighting.
   cutMm: number;
   // Longest single continuous run (limited by voltage drop). Longer
-  // orders are split into separate runs; we warn but don't block.
+  // orders warn the cashier but are never blocked — trade buy 100m+.
   maxRunM: number;
   // How many metres of lead tail are included free with each strip,
   // and the per-metre charge for anything above that.
@@ -27,13 +30,13 @@ interface StripProduct {
   tailPerM: number;
 }
 
-const STRIP_PRODUCTS: StripProduct[] = [
+const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
   {
     id: 'hv240-ip67',
     name: 'High-Voltage Strip 240V — IP67 Outdoor',
     retailPerM: 46,
     tradePerM: 36,
-    cutMm: 1000,
+    cutMm: 500,
     maxRunM: 50,
     includedTailM: 1,
     tailPerM: 7,
@@ -70,6 +73,17 @@ const STRIP_PRODUCTS: StripProduct[] = [
   },
 ];
 
+// Show anything a metre or longer in metres, shorter in mm — Sally:
+// "once exceed over 1m the mm's convert into 1m".
+const formatLength = (mm: number): string => {
+  if (mm >= 1000) {
+    const m = mm / 1000;
+    // Trim trailing zeros: 3.00m -> 3m, 3.50m -> 3.5m
+    return `${parseFloat(m.toFixed(3))}m`;
+  }
+  return `${Math.round(mm)}mm`;
+};
+
 interface OrderLine {
   id: number;
   product: StripProduct;
@@ -96,13 +110,42 @@ const money = (n: number) =>
   });
 
 export default function StripCutModal({ onClose, onSendToCart }: Props) {
-  const [productId, setProductId] = useState(STRIP_PRODUCTS[0].id);
+  const [products, setProducts] = useState<StripProduct[]>(
+    FALLBACK_STRIP_PRODUCTS,
+  );
+  const [productId, setProductId] = useState(FALLBACK_STRIP_PRODUCTS[0].id);
   const [lengthMmStr, setLengthMmStr] = useState('');
   const [tailMStr, setTailMStr] = useState('1');
   const [isTrade, setIsTrade] = useState(false);
   const [order, setOrder] = useState<OrderLine[]>([]);
 
-  const product = STRIP_PRODUCTS.find((p) => p.id === productId)!;
+  // Pull admin-maintained rates. Falls back to the built-in list on
+  // failure so the counter still works if settings are unreachable.
+  useEffect(() => {
+    let cancelled = false;
+    settingsApi
+      .getLedStripProducts()
+      .then((r) => {
+        if (cancelled) return;
+        const list = r.data?.data?.products;
+        if (Array.isArray(list) && list.length > 0) {
+          setProducts(list);
+          // Keep the current selection if it still exists, else reset.
+          setProductId((cur) =>
+            list.some((p: StripProduct) => p.id === cur) ? cur : list[0].id,
+          );
+        }
+      })
+      .catch(() => {
+        /* keep fallback catalogue */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const product =
+    products.find((p) => p.id === productId) ?? products[0] ?? FALLBACK_STRIP_PRODUCTS[0];
   const perM = isTrade ? product.tradePerM : product.retailPerM;
 
   // Round the requested length up to the next cut point, then compute
@@ -132,7 +175,10 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
     };
   }, [lengthMmStr, tailMStr, product, perM]);
 
-  const canAdd = calc.suppliedM > 0 && !calc.exceedsMaxRun;
+  // Exceeding the max continuous run is a advisory only — it means the
+  // job needs joiners/separate runs, not that we refuse the sale. Trade
+  // routinely buy 100m+ (Sally: "take off '5m max continuous run'").
+  const canAdd = calc.suppliedM > 0;
 
   const subtotal = order.reduce((s, l) => s + l.linePrice, 0);
 
@@ -164,7 +210,7 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
       sku: `LED-STRIP-${l.product.id.toUpperCase()}-${Math.round(
         l.suppliedLengthM * 1000,
       )}`,
-      name: `${l.product.name} — ${l.suppliedLengthM}m${
+      name: `${l.product.name} — ${formatLength(l.suppliedLengthM * 1000)}${
         l.tailM > l.product.includedTailM ? ` + ${l.tailM}m tail` : ''
       }${l.isTrade ? ' (trade)' : ''}`,
       price: l.linePrice,
@@ -232,7 +278,7 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
               onChange={(e) => setProductId(e.target.value)}
               className="w-full border border-gray-700 bg-pos-bg rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
             >
-              {STRIP_PRODUCTS.map((p) => (
+              {products.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
@@ -241,7 +287,7 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
 
             <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-400">
               <span>Rate <span className="font-bold text-white">${perM.toFixed(2)}</span>/m</span>
-              <span>Cuts every <span className="font-bold text-white">{product.cutMm}mm</span></span>
+              <span>Cuts every <span className="font-bold text-white">{formatLength(product.cutMm)}</span></span>
               <span>Max run <span className="font-bold text-white">{product.maxRunM}m</span></span>
               <span>
                 Tail <span className="font-bold text-white">{product.includedTailM}m</span> incl
@@ -292,7 +338,10 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
                 />
                 {calc.lengthMm > 0 && (
                   <p className="text-xs text-gray-500 mt-1">
-                    Rounded up to next cut point → supplied {calc.suppliedMm}mm
+                    Rounded up to next cut point → supplied{' '}
+                    <span className="text-gray-300 font-semibold">
+                      {formatLength(calc.suppliedMm)}
+                    </span>
                   </p>
                 )}
               </div>
@@ -302,23 +351,25 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
                 </label>
                 <input
                   type="number"
-                  inputMode="numeric"
+                  inputMode="decimal"
                   className="w-full border border-gray-700 bg-pos-bg rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                   value={tailMStr}
                   onChange={(e) => setTailMStr(e.target.value)}
                   min={0}
+                  step={0.5}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  {product.includedTailM}m included
+                  {product.includedTailM}m included · 0.5m steps
                 </p>
               </div>
             </div>
 
-            {/* Max-run warning */}
+            {/* Max-run advisory — informational, never blocks the sale */}
             {calc.exceedsMaxRun && (
-              <div className="mt-4 border border-red-500/40 bg-red-500/10 text-red-300 rounded-md px-3 py-2 text-sm">
-                {calc.suppliedM}m exceeds the {product.maxRunM}m max continuous run
-                — this needs separate runs or a joiner. Split into multiple lines.
+              <div className="mt-4 border border-amber-500/40 bg-amber-500/10 text-amber-300 rounded-md px-3 py-2 text-sm">
+                Heads up: {formatLength(calc.suppliedMm)} is over the{' '}
+                {product.maxRunM}m max continuous run, so this will need
+                joiners or separate runs. You can still add it.
               </div>
             )}
 
@@ -373,7 +424,7 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
                         {l.product.name}
                       </div>
                       <div className="text-xs text-gray-400">
-                        {l.suppliedLengthM}m · tail {l.tailM}m · ${l.perM.toFixed(2)}/m
+                        {formatLength(l.suppliedLengthM * 1000)} · tail {l.tailM}m · ${l.perM.toFixed(2)}/m
                         {l.isTrade ? ' · trade' : ''}
                       </div>
                     </div>

@@ -8,6 +8,7 @@ import {
   ClockIcon,
   ArrowPathIcon,
   ArrowLeftIcon,
+  ScissorsIcon,
 } from '@heroicons/react/24/outline';
 
 interface Role {
@@ -16,6 +17,18 @@ interface Role {
   displayName: string;
   maxDiscountPercent: number;
   canStackDiscounts: boolean;
+}
+
+// Mirrors the backend led-strip.defaults.ts shape.
+interface LedStripProduct {
+  id: string;
+  name: string;
+  retailPerM: number;
+  tradePerM: number;
+  cutMm: number;
+  maxRunM: number;
+  includedTailM: number;
+  tailPerM: number;
 }
 
 interface TradingHours {
@@ -33,7 +46,7 @@ const defaultTradingHours: TradingHours = {
 };
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<'store' | 'payments' | 'roles' | 'system' | 'sync'>('store');
+  const [activeTab, setActiveTab] = useState<'store' | 'payments' | 'roles' | 'system' | 'sync' | 'ledstrip'>('store');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
@@ -71,6 +84,10 @@ export default function SettingsPage() {
     default_stock_hold: false,
     offline_mode_enabled: false,
   });
+
+  // LED strip cut-to-length rates (Strip Cut Counter). Editable here so
+  // Sally can adjust strip/tail pricing without a deploy.
+  const [stripProducts, setStripProducts] = useState<LedStripProduct[]>([]);
 
   // Sync state
   const [syncStatus, setSyncStatus] = useState<{
@@ -115,6 +132,10 @@ export default function SettingsPage() {
         case 'system':
           const sysRes = await settingsApi.getSystemSettings();
           setSystemSettings(sysRes.data.data);
+          break;
+        case 'ledstrip':
+          const stripRes = await settingsApi.getLedStripProducts();
+          setStripProducts(stripRes.data.data.products || []);
           break;
         case 'sync':
           const statusRes = await syncApi.getStatus();
@@ -273,10 +294,56 @@ export default function SettingsPage() {
     });
   };
 
+  const handleSaveStripProducts = async () => {
+    setIsSaving(true);
+    setSaveMessage('');
+    try {
+      const res = await settingsApi.updateLedStripProducts(stripProducts);
+      // Server normalises (clamps NaN / negative values) — take its copy
+      // back so the form shows exactly what was stored.
+      setStripProducts(res.data.data.products || stripProducts);
+      setSaveMessage('LED strip pricing saved successfully!');
+      setTimeout(() => setSaveMessage(''), 3000);
+    } catch (error) {
+      setSaveMessage('Failed to save LED strip pricing');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleResetStripProducts = async () => {
+    try {
+      const res = await settingsApi.getLedStripDefaults();
+      setStripProducts(res.data.data.products || []);
+      setSaveMessage('Defaults loaded — press Save to apply them.');
+      setTimeout(() => setSaveMessage(''), 4000);
+    } catch (error) {
+      setSaveMessage('Failed to load defaults');
+    }
+  };
+
+  const updateStripField = (
+    id: string,
+    field: keyof LedStripProduct,
+    value: string,
+  ) => {
+    setStripProducts((prev) =>
+      prev.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              [field]: field === 'name' ? value : parseFloat(value) || 0,
+            }
+          : p,
+      ),
+    );
+  };
+
   const tabs = [
     { id: 'store', label: 'Store', icon: BuildingStorefrontIcon },
     { id: 'payments', label: 'Payments', icon: CreditCardIcon },
     { id: 'roles', label: 'Roles', icon: UserGroupIcon },
+    { id: 'ledstrip', label: 'LED Strip', icon: ScissorsIcon },
     { id: 'system', label: 'System', icon: Cog6ToothIcon },
     { id: 'sync', label: 'Magento Sync', icon: ArrowPathIcon },
   ];
@@ -664,6 +731,162 @@ export default function SettingsPage() {
                     <strong className="text-green-400">Admin:</strong> Unlimited discount authority,
                     full system access
                   </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* LED Strip cut-to-length rates */}
+          {activeTab === 'ledstrip' && (
+            <div className="space-y-6">
+              <div className="card p-6">
+                <h2 className="text-lg font-semibold mb-1">
+                  LED Strip — Cut-to-Length Rates
+                </h2>
+                <p className="text-sm text-gray-400 mb-4">
+                  Drives the Strip Cut Counter on the POS screen. All prices
+                  are per metre and GST inclusive.
+                </p>
+
+                <div className="space-y-4">
+                  {stripProducts.map((p) => (
+                    <div
+                      key={p.id}
+                      className="bg-pos-accent/40 border border-gray-700 rounded-lg p-4"
+                    >
+                      <div className="mb-3">
+                        <label className="block text-xs text-gray-400 mb-1">
+                          Product name
+                        </label>
+                        <input
+                          type="text"
+                          className="input w-full"
+                          value={p.name}
+                          onChange={(e) =>
+                            updateStripField(p.id, 'name', e.target.value)
+                          }
+                        />
+                        <p className="text-[11px] text-gray-500 mt-1 font-mono">
+                          {p.id}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Retail $/m
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="input w-full"
+                            value={p.retailPerM}
+                            onChange={(e) =>
+                              updateStripField(p.id, 'retailPerM', e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Trade $/m
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="input w-full"
+                            value={p.tradePerM}
+                            onChange={(e) =>
+                              updateStripField(p.id, 'tradePerM', e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Tail $/m
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="input w-full"
+                            value={p.tailPerM}
+                            onChange={(e) =>
+                              updateStripField(p.id, 'tailPerM', e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Tail incl. (m)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            className="input w-full"
+                            value={p.includedTailM}
+                            onChange={(e) =>
+                              updateStripField(p.id, 'includedTailM', e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Cut every (mm)
+                          </label>
+                          <input
+                            type="number"
+                            step="50"
+                            min="1"
+                            className="input w-full"
+                            value={p.cutMm}
+                            onChange={(e) =>
+                              updateStripField(p.id, 'cutMm', e.target.value)
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1">
+                            Max run (m)
+                          </label>
+                          <input
+                            type="number"
+                            step="1"
+                            min="1"
+                            className="input w-full"
+                            value={p.maxRunM}
+                            onChange={(e) =>
+                              updateStripField(p.id, 'maxRunM', e.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs text-gray-500 mt-4">
+                  Max run is advisory only — staff are warned but can still
+                  sell longer lengths (they just need joiners).
+                </p>
+
+                <div className="flex gap-3 mt-4">
+                  <button
+                    className="btn-primary"
+                    onClick={handleSaveStripProducts}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? 'Saving...' : 'Save LED Strip Pricing'}
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    onClick={handleResetStripProducts}
+                    disabled={isSaving}
+                  >
+                    Load Defaults
+                  </button>
                 </div>
               </div>
             </div>

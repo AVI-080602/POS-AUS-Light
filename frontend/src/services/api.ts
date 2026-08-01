@@ -370,6 +370,13 @@ export const settingsApi = {
     default_stock_hold?: boolean;
     offline_mode_enabled?: boolean;
   }) => api.put('/settings/system', data),
+
+  // LED strip cut-to-length rates. Read is open to all staff (the Strip
+  // Cut Counter needs it); update/reset are admin-only server-side.
+  getLedStripProducts: () => api.get('/settings/led-strip'),
+  updateLedStripProducts: (products: any[]) =>
+    api.put('/settings/led-strip', { products }),
+  getLedStripDefaults: () => api.get('/settings/led-strip/defaults'),
 };
 
 // Sync API (Admin only)
