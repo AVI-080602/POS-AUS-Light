@@ -25,9 +25,12 @@ interface TradeRule {
   id: number;
   label: string;
   percent: number;
-  matchType: 'category' | 'all_except_prefix' | 'all';
+  matchType: 'category' | 'category_name' | 'all_except_prefix' | 'all';
   categoryId?: number | null;
+  categoryName?: string | null;
   excludeNamePrefix?: string | null;
+  baseOnSpecialPrice?: boolean;
+  excludeClearance?: boolean;
   enabled: boolean;
 }
 
@@ -801,8 +804,8 @@ export default function SettingsPage() {
                   Trade Auto-Discount Rules
                 </h2>
                 <p className="text-sm text-gray-400 mb-4">
-                  What a trade customer automatically comes off retail. Only
-                  the single highest matching rule applies to a line — they
+                  What a trade customer automatically comes off. Rules are
+                  checked top to bottom and the FIRST match applies — they
                   don't stack. A cashier's manual discount only wins if it's
                   larger. These mirror the Magento cart price rules.
                 </p>
@@ -872,7 +875,10 @@ export default function SettingsPage() {
                               updateTradeRule(r.id, 'matchType', e.target.value)
                             }
                           >
-                            <option value="category">A category</option>
+                            <option value="category">A category (by ID)</option>
+                            <option value="category_name">
+                              A category (by name)
+                            </option>
                             <option value="all_except_prefix">
                               Everything except a brand
                             </option>
@@ -893,6 +899,29 @@ export default function SettingsPage() {
                                   updateTradeRule(
                                     r.id,
                                     'categoryId',
+                                    e.target.value,
+                                  )
+                                }
+                              />
+                              <p className="text-[11px] text-gray-500 mt-1">
+                                Includes all sub-categories
+                              </p>
+                            </>
+                          )}
+                          {r.matchType === 'category_name' && (
+                            <>
+                              <label className="block text-xs text-gray-400 mb-1">
+                                Category name
+                              </label>
+                              <input
+                                type="text"
+                                className="input w-full"
+                                placeholder="e.g. Ceiling Fans"
+                                value={r.categoryName ?? ''}
+                                onChange={(e) =>
+                                  updateTradeRule(
+                                    r.id,
+                                    'categoryName',
                                     e.target.value,
                                   )
                                 }
@@ -923,6 +952,57 @@ export default function SettingsPage() {
                             </>
                           )}
                         </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3">
+                        {(r.matchType === 'category' ||
+                          r.matchType === 'category_name') && (
+                          <label className="flex items-center gap-2 text-xs text-gray-300">
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4"
+                              checked={!!r.excludeNamePrefix}
+                              onChange={(e) =>
+                                updateTradeRule(
+                                  r.id,
+                                  'excludeNamePrefix',
+                                  e.target.checked ? 'eglo' : '',
+                                )
+                              }
+                            />
+                            Exclude Eglo
+                          </label>
+                        )}
+                        <label className="flex items-center gap-2 text-xs text-gray-300">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4"
+                            checked={!!r.baseOnSpecialPrice}
+                            onChange={(e) =>
+                              updateTradeRule(
+                                r.id,
+                                'baseOnSpecialPrice',
+                                e.target.checked,
+                              )
+                            }
+                          />
+                          Apply % to special price (not RRP)
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-gray-300">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4"
+                            checked={!!r.excludeClearance}
+                            onChange={(e) =>
+                              updateTradeRule(
+                                r.id,
+                                'excludeClearance',
+                                e.target.checked,
+                              )
+                            }
+                          />
+                          No discount on SALE / CLEARANCE items
+                        </label>
                       </div>
                     </div>
                   ))}

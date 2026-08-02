@@ -55,8 +55,10 @@ export class QuotesController {
       where: { id: In(ids) },
       relations: ['categories'],
     });
-    const discounts: Record<number, { percent: number; label: string | null }> =
-      {};
+    const discounts: Record<
+      number,
+      { percent: number; label: string | null; baseOnSpecialPrice: boolean }
+    > = {};
     for (const p of products) {
       discounts[p.id] = await this.tradeDiscounts.getAutoDiscount(p);
     }

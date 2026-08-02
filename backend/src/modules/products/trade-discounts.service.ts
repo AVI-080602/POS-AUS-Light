@@ -62,6 +62,8 @@ export class TradeDiscountsService {
   // them up immediately instead of waiting out the TTL.
   invalidateRulesCache(): void {
     this.rulesCache = null;
+    // Rules may target different category names now.
+    this.nameSubtreeCache.clear();
   }
 
   // Cache: smart-home root id → set of itself + all descendant ids.
@@ -103,18 +105,61 @@ export class TradeDiscountsService {
   // Returns the percent (0-100) of the best-matching trade rule for
   // this product, plus a label so the caller can show it to the cashier
   // / log it. Returns 0 / null when no rule matches.
-  async getAutoDiscount(
-    product: Product,
-  ): Promise<{ percent: number; label: string | null }> {
+  // Cache: category NAME (lowercased) → union of subtree ids for every
+  // category carrying that name. Same lifetime as subtreeCache.
+  private nameSubtreeCache = new Map<string, Set<number>>();
+
+  private async getSubtreeIdsByName(categoryName: string): Promise<Set<number>> {
+    const key = categoryName.trim().toLowerCase();
+    const cached = this.nameSubtreeCache.get(key);
+    if (cached) return cached;
+    const all = await this.categoryRepository.find({ select: ['id', 'name'] });
+    const roots = all.filter(
+      (c) => (c.name || '').trim().toLowerCase() === key,
+    );
+    const result = new Set<number>();
+    for (const root of roots) {
+      for (const id of await this.getSubtreeIds(root.id)) {
+        result.add(id);
+      }
+    }
+    this.nameSubtreeCache.set(key, result);
+    return result;
+  }
+
+  // A product counts as clearance when any of its categories is named
+  // like one ("Warehouse Clearance", "Clearance", "Sale").
+  private isClearanceProduct(product: Product): boolean {
+    return (product.categories || []).some((c) => {
+      const n = (c.name || '').trim().toLowerCase();
+      return /clearance/.test(n) || n === 'sale';
+    });
+  }
+
+  async getAutoDiscount(product: Product): Promise<{
+    percent: number;
+    label: string | null;
+    // The % applies to the sale-aware effective price instead of the
+    // fixed retail RRP (ceiling-fans rule).
+    baseOnSpecialPrice: boolean;
+  }> {
+    const NONE = { percent: 0, label: null, baseOnSpecialPrice: false };
     const rules = await this.getRules();
     const productCategoryIds = new Set<number>(
       (product.categories || []).map((c) => c.id),
     );
     const name = (product.name || '').trim().toLowerCase();
 
-    let best: { percent: number; label: string } | null = null;
+    // First enabled match WINS and terminates — mirrors Magento's
+    // stop_rules_processing. Rule order is part of the configuration.
     for (const rule of rules) {
       if (!rule.enabled) continue;
+
+      // Brand exclusion applies to every matchType. Whole-word prefix
+      // so "Eglo" doesn't also exclude something like "Eglobe".
+      const prefix = (rule.excludeNamePrefix || '').toLowerCase();
+      const excludedByPrefix =
+        !!prefix && new RegExp(`^${prefix}\\b`, 'i').test(name);
 
       let matches = false;
       switch (rule.matchType) {
@@ -126,25 +171,43 @@ export class TradeDiscountsService {
           matches = [...productCategoryIds].some((id) => subtree.has(id));
           break;
         }
-        case 'all_except_prefix': {
-          const prefix = (rule.excludeNamePrefix || '').toLowerCase();
-          // Whole-word prefix match so "Eglo" doesn't also exclude
-          // something like "Eglobe".
-          matches = prefix
-            ? !new RegExp(`^${prefix}\\b`, 'i').test(name)
-            : true;
+        case 'category_name': {
+          if (!rule.categoryName) break;
+          const subtree = await this.getSubtreeIdsByName(rule.categoryName);
+          matches = [...productCategoryIds].some((id) => subtree.has(id));
           break;
         }
+        case 'all_except_prefix':
+          matches = true; // prefix handled below for all types
+          break;
         case 'all':
           matches = true;
           break;
       }
 
-      if (!matches) continue;
-      if (!best || rule.percent > best.percent) {
-        best = { percent: rule.percent, label: rule.label };
+      if (!matches || excludedByPrefix) {
+        // Category rules with an excluded brand fall through to later
+        // rules ONLY when the category itself didn't match; a brand
+        // exclusion on a matching category rule means "no discount for
+        // this brand here", but broader rules may still apply — except
+        // they carry the same brand exclusions in practice, so simply
+        // continue.
+        continue;
       }
+
+      // SALE / CLEARANCE carve-out: the item matched this rule but is
+      // marked down already — no trade discount, and no falling through
+      // to a broader (bigger) rule either.
+      if (rule.excludeClearance && this.isClearanceProduct(product)) {
+        return NONE;
+      }
+
+      return {
+        percent: rule.percent,
+        label: rule.label,
+        baseOnSpecialPrice: rule.baseOnSpecialPrice === true,
+      };
     }
-    return best ? best : { percent: 0, label: null };
+    return NONE;
   }
 }

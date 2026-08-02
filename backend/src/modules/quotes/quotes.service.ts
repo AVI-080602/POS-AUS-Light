@@ -110,23 +110,29 @@ export class QuotesService {
 
       // Resolve the trade rate first — the base-price choice depends on
       // what it actually works out to. Mirrors orders.service.ts::create.
-      const autoTrade = isTrade
-        ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
-        : 0;
+      const auto = isTrade
+        ? await this.tradeDiscounts.getAutoDiscount(product)
+        : { percent: 0, label: null, baseOnSpecialPrice: false };
+      const autoTrade = auto.percent;
 
       // Trade normally prices off the fixed retail (product.price) even
       // when the item is on sale — trade % is applied to that base,
-      // preventing a sale-plus-trade double discount. Exception: if the
-      // trade rate lands ABOVE what a walk-in would pay on a deep sale,
-      // the customer price wins and the trade % is dropped.
+      // preventing a sale-plus-trade double discount. Rules flagged
+      // baseOnSpecialPrice (Ceiling Fans) apply their % to the
+      // sale-aware price instead. Exception: if the trade rate lands
+      // ABOVE what a walk-in would pay on a deep sale, the customer
+      // price wins and the trade % is dropped.
       const retailNet = product.isOnSale
         ? Number(product.specialPrice)
         : Number(product.price);
-      const tradeNet = Number(product.price) * (1 - autoTrade / 100);
+      const tradeBase = auto.baseOnSpecialPrice
+        ? retailNet
+        : Number(product.price);
+      const tradeNet = tradeBase * (1 - autoTrade / 100);
       const tradeWins = !isTrade || tradeNet <= retailNet;
       const defaultPrice = isTrade
         ? tradeWins
-          ? Number(product.price)
+          ? tradeBase
           : retailNet
         : retailNet;
       // Allow caller to override unit price (e.g. trade pricing on quotes)
@@ -251,21 +257,27 @@ export class QuotesService {
         throw new NotFoundException(`Product with ID ${item.productId} not found`);
       }
 
-      const autoTrade = isTrade
-        ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
-        : 0;
+      const auto = isTrade
+        ? await this.tradeDiscounts.getAutoDiscount(product)
+        : { percent: 0, label: null, baseOnSpecialPrice: false };
+      const autoTrade = auto.percent;
       // Trade: base off fixed retail (never the sale price) so trade
-      // % doesn't stack on top of the sale discount — unless the trade
-      // rate ends up dearer than the customer price, in which case the
-      // customer price wins and trade % is dropped.
+      // % doesn't stack on top of the sale discount — rules flagged
+      // baseOnSpecialPrice (Ceiling Fans) use the sale-aware price
+      // instead — unless the trade rate ends up dearer than the
+      // customer price, in which case the customer price wins and the
+      // trade % is dropped.
       const retailNet = product.isOnSale
         ? Number(product.specialPrice)
         : Number(product.price);
-      const tradeNet = Number(product.price) * (1 - autoTrade / 100);
+      const tradeBase = auto.baseOnSpecialPrice
+        ? retailNet
+        : Number(product.price);
+      const tradeNet = tradeBase * (1 - autoTrade / 100);
       const tradeWins = !isTrade || tradeNet <= retailNet;
       const defaultPrice = isTrade
         ? tradeWins
-          ? Number(product.price)
+          ? tradeBase
           : retailNet
         : retailNet;
       const unitPrice =

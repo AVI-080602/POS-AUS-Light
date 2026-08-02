@@ -218,17 +218,20 @@ export class OrdersService {
         // Trade auto-discount is resolved first because the base-price
         // choice below depends on what the trade rate actually works out to.
         const manualDiscount = item.discountPercent || 0;
-        const autoDiscount =
+        const auto =
           isTradeOrder && !dto.trustItemUnitPrices
-            ? (await this.tradeDiscounts.getAutoDiscount(product)).percent
-            : 0;
+            ? await this.tradeDiscounts.getAutoDiscount(product)
+            : { percent: 0, label: null, baseOnSpecialPrice: false };
+        const autoDiscount = auto.percent;
 
         // Base price selection:
         //   - Retail customers on a SALE item: use special price.
         //   - Trade customers: normally the fixed retail price, even when
         //     the item is on sale — the trade % applies to that base, so
         //     trade never stacks on top of the sale discount (trade off
-        //     retail only).
+        //     retail only). Rules flagged baseOnSpecialPrice (Ceiling
+        //     Fans: "15% on Special Price") apply their % to the
+        //     sale-aware price instead.
         //   - EXCEPT when that lands ABOVE what a walk-in would pay on a
         //     deep sale. Sally: "If Trade price is dearer than the
         //     customer price, an automatic rule that customer price is
@@ -238,11 +241,14 @@ export class OrdersService {
         const retailNet = isOnSale
           ? Number(product.specialPrice)
           : Number(product.price);
-        const tradeNet = Number(product.price) * (1 - autoDiscount / 100);
+        const tradeBase = auto.baseOnSpecialPrice
+          ? retailNet
+          : Number(product.price);
+        const tradeNet = tradeBase * (1 - autoDiscount / 100);
         const tradeWins = !isTradeOrder || tradeNet <= retailNet;
         const effective = isTradeOrder
           ? tradeWins
-            ? Number(product.price)
+            ? tradeBase
             : retailNet
           : retailNet;
         // Honour a per-line unitPrice override when:

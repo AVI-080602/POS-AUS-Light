@@ -1128,7 +1128,7 @@ export default function PaymentModal({
             re-applies the same fee from a matching backend map. */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-400 mb-2">
-            Fulfilment
+            Delivery
           </label>
           <select
             className="input w-full"
