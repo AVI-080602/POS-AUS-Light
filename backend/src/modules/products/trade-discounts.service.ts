@@ -105,18 +105,25 @@ export class TradeDiscountsService {
   // Returns the percent (0-100) of the best-matching trade rule for
   // this product, plus a label so the caller can show it to the cashier
   // / log it. Returns 0 / null when no rule matches.
-  // Cache: category NAME (lowercased) → union of subtree ids for every
-  // category carrying that name. Same lifetime as subtreeCache.
+  // Cache: category NAME phrase (lowercased) → union of subtree ids for
+  // every category matching it. Same lifetime as subtreeCache.
   private nameSubtreeCache = new Map<string, Set<number>>();
 
+  // CONTAINS match, not exact: the POS tree has no category literally
+  // named "Ceiling Fans" — the fan categories are "DC Ceiling Fans",
+  // "Outdoor Ceiling Fans", "Ceiling Fans with Lights", etc. under a
+  // parent called "Fans". A word-bounded contains match catches all of
+  // them (but not, say, "Pedestal Fans").
   private async getSubtreeIdsByName(categoryName: string): Promise<Set<number>> {
     const key = categoryName.trim().toLowerCase();
     const cached = this.nameSubtreeCache.get(key);
     if (cached) return cached;
     const all = await this.categoryRepository.find({ select: ['id', 'name'] });
-    const roots = all.filter(
-      (c) => (c.name || '').trim().toLowerCase() === key,
+    const phrase = new RegExp(
+      `(^|[^a-z0-9])${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`,
+      'i',
     );
+    const roots = all.filter((c) => phrase.test((c.name || '').trim()));
     const result = new Set<number>();
     for (const root of roots) {
       for (const id of await this.getSubtreeIds(root.id)) {

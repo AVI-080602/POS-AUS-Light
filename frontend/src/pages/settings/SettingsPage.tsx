@@ -105,8 +105,10 @@ export default function SettingsPage() {
   const [stripProducts, setStripProducts] = useState<LedStripProduct[]>([]);
 
   // Trade auto-discount rules — the % a trade customer gets off, and
-  // what each rule applies to.
+  // what each rule applies to. Defaults kept alongside so an older
+  // saved rule-set can be restored to the shipped configuration.
   const [tradeRules, setTradeRules] = useState<TradeRule[]>([]);
+  const [tradeRuleDefaults, setTradeRuleDefaults] = useState<TradeRule[]>([]);
 
   // Sync state
   const [syncStatus, setSyncStatus] = useState<{
@@ -159,6 +161,7 @@ export default function SettingsPage() {
         case 'trade':
           const tradeRes = await productsApi.getTradeRules();
           setTradeRules(tradeRes.data.data.rules || []);
+          setTradeRuleDefaults(tradeRes.data.data.defaults || []);
           break;
         case 'sync':
           const statusRes = await syncApi.getStatus();
@@ -1015,13 +1018,26 @@ export default function SettingsPage() {
                   price wins.
                 </p>
 
-                <button
-                  className="btn-primary mt-4"
-                  onClick={handleSaveTradeRules}
-                  disabled={isSaving}
-                >
-                  {isSaving ? 'Saving...' : 'Save Trade Pricing Rules'}
-                </button>
+                <div className="flex gap-3 mt-4">
+                  <button
+                    className="btn-primary"
+                    onClick={handleSaveTradeRules}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? 'Saving...' : 'Save Trade Pricing Rules'}
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    disabled={isSaving || tradeRuleDefaults.length === 0}
+                    onClick={() => {
+                      setTradeRules(tradeRuleDefaults);
+                      setSaveMessage('Defaults loaded — press Save to apply them.');
+                      setTimeout(() => setSaveMessage(''), 4000);
+                    }}
+                  >
+                    Load Defaults
+                  </button>
+                </div>
               </div>
             </div>
           )}
