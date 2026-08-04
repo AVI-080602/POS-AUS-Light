@@ -37,7 +37,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     retailPerM: 46,
     tradePerM: 36,
     cutMm: 500,
-    maxRunM: 50,
+    maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 7,
   },
@@ -47,7 +47,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     retailPerM: 28,
     tradePerM: 22,
     cutMm: 100,
-    maxRunM: 10,
+    maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 6,
   },
@@ -57,7 +57,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     retailPerM: 18,
     tradePerM: 14,
     cutMm: 50,
-    maxRunM: 5,
+    maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 5,
   },
@@ -67,7 +67,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     retailPerM: 32,
     tradePerM: 25,
     cutMm: 50,
-    maxRunM: 5,
+    maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 5,
   },
@@ -114,7 +114,9 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
     FALLBACK_STRIP_PRODUCTS,
   );
   const [productId, setProductId] = useState(FALLBACK_STRIP_PRODUCTS[0].id);
-  const [lengthMmStr, setLengthMmStr] = useState('');
+  // Entered in METRES (decimals fine — 3.2 = 3200mm); converted to mm
+  // internally for the cut-point rounding.
+  const [lengthMStr, setLengthMStr] = useState('');
   const [tailMStr, setTailMStr] = useState('1');
   const [isTrade, setIsTrade] = useState(false);
   const [order, setOrder] = useState<OrderLine[]>([]);
@@ -151,7 +153,8 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
   // Round the requested length up to the next cut point, then compute
   // supplied metres + tail metres + total line price.
   const calc = useMemo(() => {
-    const lengthMm = Math.max(0, Number(lengthMmStr) || 0);
+    const lengthM = Math.max(0, Number(lengthMStr) || 0);
+    const lengthMm = Math.round(lengthM * 1000);
     const tailM = Math.max(0, Number(tailMStr) || 0);
     const suppliedMm = lengthMm > 0
       ? Math.ceil(lengthMm / product.cutMm) * product.cutMm
@@ -173,7 +176,7 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
       linePrice,
       exceedsMaxRun,
     };
-  }, [lengthMmStr, tailMStr, product, perM]);
+  }, [lengthMStr, tailMStr, product, perM]);
 
   // Exceeding the max continuous run is a advisory only — it means the
   // job needs joiners/separate runs, not that we refuse the sale. Trade
@@ -197,7 +200,7 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
         isTrade,
       },
     ]);
-    setLengthMmStr('');
+    setLengthMStr('');
   };
 
   const handleRemove = (id: number) => {
@@ -220,8 +223,13 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
   };
 
   // Reel bar visualisation — show N slots for cut points, coloured
-  // amber up to the current supplied length. Purely decorative.
-  const reelSlots = Math.max(10, Math.ceil(product.maxRunM * 1000 / product.cutMm));
+  // amber up to the current supplied length. Purely decorative. Capped
+  // at 40 slots: with the max run at 1000m an uncapped bar would try to
+  // render thousands of segments.
+  const reelSlots = Math.min(
+    40,
+    Math.max(10, Math.ceil((product.maxRunM * 1000) / product.cutMm)),
+  );
   const filledSlots = Math.min(
     reelSlots,
     Math.ceil(calc.suppliedMm / product.cutMm),
@@ -325,15 +333,17 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
             <div className="mt-4 grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-400 mb-1">
-                  Length (mm)
+                  Length (m)
                 </label>
                 <input
                   type="number"
-                  inputMode="numeric"
+                  inputMode="decimal"
+                  min={0}
+                  step={0.5}
                   className="w-full border border-gray-700 bg-pos-bg rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  value={lengthMmStr}
-                  onChange={(e) => setLengthMmStr(e.target.value)}
-                  placeholder="e.g. 3200"
+                  value={lengthMStr}
+                  onChange={(e) => setLengthMStr(e.target.value)}
+                  placeholder="e.g. 3.2"
                   autoFocus
                 />
                 {calc.lengthMm > 0 && (
