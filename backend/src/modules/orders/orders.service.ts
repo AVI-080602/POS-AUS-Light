@@ -621,6 +621,12 @@ export class OrdersService {
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
+    // Discount audit-log writes collected during the transaction and
+    // flushed AFTER commit. They run on a different pooled connection,
+    // so writing them mid-transaction self-deadlocks against our own
+    // uncommitted order rows (50s lock-wait timeout, failed sale).
+    const deferredDiscountAudits: Array<() => Promise<unknown>> = [];
+
     try {
       // Create order
       const order = queryRunner.manager.create(Order, {
@@ -720,17 +726,29 @@ export class OrdersService {
           await queryRunner.manager.save(orderItem);
 
           if (calcItem.discountPercent > 0) {
-            await this.discountsService.logAppliedDiscount(
-              savedOrder.id,
-              orderItem.id,
-              userId,
-              userRole.name,
-              DiscountType.PRODUCT,
-              calcItem.discountPercent,
-              lineDiscountAmount,
-              calcItem.unitPrice * qty,
-              rowTotal,
-              dto.cartDiscount ? true : false,
+            // DEFERRED until after commit. The audit repository uses a
+            // different pooled connection, and its FK check against the
+            // just-inserted (uncommitted) order/order_item rows blocks on
+            // locks this transaction holds — while this transaction waits
+            // on the insert. Self-deadlock, 50s lock-wait timeout, dead
+            // sale. Discounted orders were failing with a 500 because of
+            // exactly this.
+            const itemId = orderItem.id;
+            const discountPct = calcItem.discountPercent;
+            const unitPriceForAudit = calcItem.unitPrice;
+            deferredDiscountAudits.push(() =>
+              this.discountsService.logAppliedDiscount(
+                savedOrder.id,
+                itemId,
+                userId,
+                userRole.name,
+                DiscountType.PRODUCT,
+                discountPct,
+                lineDiscountAmount,
+                unitPriceForAudit * qty,
+                rowTotal,
+                dto.cartDiscount ? true : false,
+              ),
             );
           }
 
@@ -767,21 +785,24 @@ export class OrdersService {
         }
       }
 
-      // Log cart discount if applied
+      // Log cart discount if applied — deferred until after commit for
+      // the same self-deadlock reason as the per-item audits above.
       if (dto.cartDiscount && dto.cartDiscount.value > 0) {
-        await this.discountsService.logAppliedDiscount(
-          savedOrder.id,
-          null,
-          userId,
-          userRole.name,
-          DiscountType.CART,
-          dto.cartDiscount.type === 'percent' ? dto.cartDiscount.value : 0,
-          validation.calculatedTotals.cartDiscount,
-          validation.calculatedTotals.subtotal -
-            validation.calculatedTotals.itemDiscounts,
-          validation.calculatedTotals.grandTotal,
-          validation.calculatedTotals.itemDiscounts > 0,
-          dto.cartDiscount.reason,
+        deferredDiscountAudits.push(() =>
+          this.discountsService.logAppliedDiscount(
+            savedOrder.id,
+            null,
+            userId,
+            userRole.name,
+            DiscountType.CART,
+            dto.cartDiscount!.type === 'percent' ? dto.cartDiscount!.value : 0,
+            validation.calculatedTotals.cartDiscount,
+            validation.calculatedTotals.subtotal -
+              validation.calculatedTotals.itemDiscounts,
+            validation.calculatedTotals.grandTotal,
+            validation.calculatedTotals.itemDiscounts > 0,
+            dto.cartDiscount!.reason,
+          ),
         );
       }
 
@@ -824,6 +845,20 @@ export class OrdersService {
       }
 
       await queryRunner.commitTransaction();
+
+      // Now the order rows are committed, write the discount audit logs.
+      // Best-effort: an audit failure must never undo a completed sale.
+      for (const writeAudit of deferredDiscountAudits) {
+        try {
+          await writeAudit();
+        } catch (auditErr) {
+          // eslint-disable-next-line no-console
+          console.error(
+            `[orders.create] discount audit write failed for order ${savedOrder.id}:`,
+            auditErr,
+          );
+        }
+      }
 
       // Fire-and-forget push to Magento. Runs in the background so staff
       // aren't blocked by Magento response time. Failures update the
