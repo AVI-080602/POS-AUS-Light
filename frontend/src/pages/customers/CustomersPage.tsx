@@ -390,7 +390,12 @@ export default function CustomersPage() {
 
   const printOrderInvoice = async (orderId: number) => {
     try {
-      const r = await ordersApi.getOrder(orderId);
+      // Refunds ride along so a reprint after a partial refund shows
+      // the returned lines + refunded total, not the original sale.
+      const [r, refundsRes] = await Promise.all([
+        ordersApi.getOrder(orderId),
+        ordersApi.getRefunds(orderId).catch(() => null),
+      ]);
       const o = r.data?.data?.order;
       if (!o) {
         toast.error('Could not load order for printing');
@@ -399,7 +404,9 @@ export default function CustomersPage() {
       // Close the order-detail modal if it's open — its backdrop sits
       // above the invoice's, so leaving it open would hide the invoice.
       setViewingOrder(null);
-      setInvoiceData(buildInvoiceData(o, selectedCustomer));
+      setInvoiceData(
+        buildInvoiceData(o, selectedCustomer, refundsRes?.data?.data?.refunds || []),
+      );
     } catch {
       toast.error('Could not load order for printing');
     }

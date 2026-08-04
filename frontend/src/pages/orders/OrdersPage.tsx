@@ -143,13 +143,21 @@ export default function OrdersPage() {
 
   const printInvoice = async (orderId: number) => {
     try {
-      const r = await ordersApi.getOrder(orderId);
+      // Refunds ride along so a reprint after a partial refund marks the
+      // returned lines and shows the refunded total instead of reading
+      // like the original untouched sale.
+      const [r, refundsRes] = await Promise.all([
+        ordersApi.getOrder(orderId),
+        ordersApi.getRefunds(orderId).catch(() => null),
+      ]);
       const o = r.data?.data?.order;
       if (!o) {
         toast.error('Could not load order for printing');
         return;
       }
-      setInvoiceData(buildInvoiceData(o));
+      setInvoiceData(
+        buildInvoiceData(o, undefined, refundsRes?.data?.data?.refunds || []),
+      );
     } catch {
       toast.error('Could not load order for printing');
     }

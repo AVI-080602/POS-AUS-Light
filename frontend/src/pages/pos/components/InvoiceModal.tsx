@@ -37,7 +37,13 @@ interface InvoiceData {
   customerPhone?: string;
   customerAddress?: string;
   companyAbn?: string;
-  items: (CartItem & { isBackorder?: boolean; isLaybyHeld?: boolean })[];
+  items: (CartItem & {
+    isBackorder?: boolean;
+    isLaybyHeld?: boolean;
+    // Units of this line refunded so far — set on re-prints via
+    // buildInvoiceData(order, ..., refunds).
+    refundedQty?: number;
+  })[];
   subtotal: number;
   itemDiscounts: number;
   cartDiscount: number;
@@ -67,6 +73,8 @@ interface InvoiceData {
   exchangeFromOrderNumber?: string;
   creditApplied?: number;
   refundDueToCustomer?: number;
+  // Total refunded on this order to date (re-prints after a refund).
+  totalRefunded?: number;
 }
 
 interface InvoiceModalProps {
@@ -166,6 +174,7 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
     // Flag clearance/sale lines so the printed invoice shows why the
     // price differs from the ticketed RRP.
     isSale: !!it.isSaleItem,
+    refundedQty: it.refundedQty || 0,
   }));
 
   return (
@@ -333,6 +342,23 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                         SALE
                       </span>
                     ) : null}
+                    {r.refundedQty > 0 ? (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          padding: '1px 5px',
+                          border: `1px solid ${ORANGE}`,
+                          color: ORANGE,
+                          borderRadius: 3,
+                          fontSize: '9px',
+                          fontWeight: 800,
+                          letterSpacing: '0.04em',
+                          verticalAlign: 'middle',
+                        }}
+                      >
+                        REFUNDED{r.refundedQty < r.qty ? ` ${r.refundedQty} OF ${r.qty}` : ''}
+                      </span>
+                    ) : null}
                   </td>
                   <td style={td('right')}>{money(r.unitPrice)}</td>
                   <td style={td('center')}>{r.takenQty || ''}</td>
@@ -427,6 +453,31 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                       </td>
                     </tr>
                   )}
+                {/* Re-print after a refund: show what's come back and
+                    the net position, so the invoice never reads like
+                    the original untouched sale. */}
+                {invoice.totalRefunded != null && invoice.totalRefunded > 0.01 && (
+                  <>
+                    <tr>
+                      <td style={{ ...totLabel, color: ORANGE }}>
+                        LESS REFUNDED:
+                      </td>
+                      <td style={{ ...totVal(), color: ORANGE }}>
+                        -{money(invoice.totalRefunded)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td style={{ ...totLabel, fontWeight: 800, color: INK }}>
+                        NET AFTER REFUND:
+                      </td>
+                      <td style={{ ...totVal(true), fontSize: '15px' }}>
+                        {money(
+                          Math.max(0, invoice.grandTotal - invoice.totalRefunded),
+                        )}
+                      </td>
+                    </tr>
+                  </>
+                )}
                 {invoice.cashTendered != null && (
                   <>
                     <tr>

@@ -2,7 +2,12 @@
 // (ordersApi.getOrder(...).data.data.order). Shared by the POS "Last
 // Invoice" button and the Customers page re-print so the mapping lives
 // in one place.
-export function buildInvoiceData(o: any, fallbackCustomer?: any) {
+//
+// `refunds` (ordersApi.getRefunds(...).data.data.refunds) is optional;
+// when supplied, refunded quantities are marked per line and the totals
+// block shows the refunded amount — a reprint after a partial refund
+// must not read like the original untouched sale.
+export function buildInvoiceData(o: any, fallbackCustomer?: any, refunds?: any[]) {
   const cust = o.customer || fallbackCustomer || null;
   const addr = cust
     ? [
@@ -14,6 +19,16 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any) {
         .filter(Boolean)
         .join(', ')
     : '';
+  // qty refunded per order_item id, across every refund on the order
+  const refundedQtyByItem: Record<number, number> = {};
+  let totalRefunded = 0;
+  for (const r of refunds || []) {
+    totalRefunded += Number(r.refundAmount || 0);
+    for (const ri of r.items || []) {
+      refundedQtyByItem[ri.orderItemId] =
+        (refundedQtyByItem[ri.orderItemId] || 0) + Number(ri.quantity || 0);
+    }
+  }
   const items = (o.items || []).map((it: any) => ({
     productId: it.productId ?? 0,
     sku: it.sku || '',
@@ -26,6 +41,7 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any) {
     rowTotal: parseFloat(it.rowTotal ?? it.unitPrice * it.quantity),
     isBackorder: !!it.isBackorder,
     isLaybyHeld: !!it.isLaybyHeld,
+    refundedQty: refundedQtyByItem[it.id] || 0,
   }));
   const firstPayment = (o.payments || [])[0];
   const userName = o.user
@@ -57,5 +73,6 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any) {
     paymentMethod: firstPayment?.method || 'eftpos',
     salesPerson: userName,
     notes: o.notes || undefined,
+    totalRefunded: totalRefunded > 0 ? Math.round(totalRefunded * 100) / 100 : undefined,
   };
 }

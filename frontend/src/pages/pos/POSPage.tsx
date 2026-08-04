@@ -123,13 +123,18 @@ export default function POSPage() {
         toast.error('No recent orders found');
         return;
       }
-      const full = await ordersApi.getOrder(last.id);
+      const [full, refundsRes] = await Promise.all([
+        ordersApi.getOrder(last.id),
+        ordersApi.getRefunds(last.id).catch(() => null),
+      ]);
       const o = full.data?.data?.order;
       if (!o) {
         toast.error('Could not load the last invoice');
         return;
       }
-      setInvoiceData(buildInvoiceData(o));
+      setInvoiceData(
+        buildInvoiceData(o, undefined, refundsRes?.data?.data?.refunds || []),
+      );
     } catch {
       toast.error('Could not load the last invoice');
     }
