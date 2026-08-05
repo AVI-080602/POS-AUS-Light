@@ -431,7 +431,19 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                       fontSize: '16px',
                     }}
                   >
-                    {money(showDeposit ? invoice.balanceDue! : invoice.grandTotal)}
+                    {/* Store credit is money already paid — subtract it so
+                        a credit-covered exchange prints BALANCE $0.00
+                        instead of re-billing the replacement item. */}
+                    {money(
+                      Math.max(
+                        0,
+                        Math.round(
+                          ((showDeposit ? invoice.balanceDue! : invoice.grandTotal) -
+                            (invoice.creditApplied || 0)) *
+                            100,
+                        ) / 100,
+                      ),
+                    )}
                   </td>
                 </tr>
                 {invoice.refundDueToCustomer != null &&

@@ -44,6 +44,12 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any, refunds?: any[]
     refundedQty: refundedQtyByItem[it.id] || 0,
   }));
   const firstPayment = (o.payments || [])[0];
+  // Store credit consumed by this order — shown as CREDIT APPLIED and
+  // subtracted from the printed BALANCE (a credit-covered exchange must
+  // print $0.00, not re-bill the replacement).
+  const creditApplied = (o.payments || [])
+    .filter((p: any) => p.method === 'store_credit')
+    .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
   const userName = o.user
     ? [o.user.firstName, o.user.lastName].filter(Boolean).join(' ').trim() ||
       o.user.username
@@ -74,5 +80,10 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any, refunds?: any[]
     salesPerson: userName,
     notes: o.notes || undefined,
     totalRefunded: totalRefunded > 0 ? Math.round(totalRefunded * 100) / 100 : undefined,
+    creditApplied:
+      creditApplied > 0 ? Math.round(creditApplied * 100) / 100 : undefined,
+    // Present when the order detail endpoint attached exchange links
+    // (this sale replaced goods returned on an earlier order).
+    exchangeFromOrderNumber: o.exchangeFromOrder?.orderNumber || undefined,
   };
 }
