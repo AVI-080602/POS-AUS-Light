@@ -252,6 +252,10 @@ export default function PaymentModal({
   const [storeCreditBalance, setStoreCreditBalance] = useState(0);
   const [useStoreCredit, setUseStoreCredit] = useState(false);
   const [storeCreditAmount, setStoreCreditAmount] = useState(0);
+  // Exchange difference: pay the credit left over after this sale back
+  // to the customer as cash when the order completes. Defaults ON —
+  // Sally: "we need to refund the difference!"
+  const [payOutRemainder, setPayOutRemainder] = useState(true);
 
   // Layby state. The 20% minimum and 90-day default are also enforced
   // server-side; these constants just drive the UI defaults.
@@ -503,6 +507,13 @@ export default function PaymentModal({
   const remainingDue = Math.max(
     0,
     Math.round((totalWithDelivery - creditApplied) * 100) / 100,
+  );
+  // Credit left over AFTER this sale consumes its share — on an
+  // exchange this is money owed back to the customer (return worth
+  // more than the replacement).
+  const creditRemainderAfterSale = Math.max(
+    0,
+    Math.round((storeCreditBalance - creditApplied) * 100) / 100,
   );
 
   const cashAmount = parseFloat(cashTendered) || 0;
@@ -782,6 +793,39 @@ export default function PaymentModal({
         }
 
         orderNumber = response.data.data.order.orderNumber;
+
+        // Exchange difference: the return was worth more than this sale,
+        // so pay the leftover credit back over the counter. Best-effort —
+        // the order is already committed; a payout failure just points
+        // the cashier at the manual button.
+        if (
+          payOutRemainder &&
+          cart.exchangeFromOrderId &&
+          cart.customerId &&
+          creditApplied > 0 &&
+          creditRemainderAfterSale > 0.005
+        ) {
+          try {
+            await customersApi.cashOutStoreCredit(cart.customerId, {
+              amount: creditRemainderAfterSale,
+              note: `Refund of exchange difference on ${orderNumber}${
+                cart.exchangeFromOrderNumber
+                  ? ` (exchange of ${cart.exchangeFromOrderNumber})`
+                  : ''
+              }`,
+            });
+            toast.success(
+              `Hand $${creditRemainderAfterSale.toFixed(2)} cash back to the customer`,
+              { duration: 8000, icon: '💵' },
+            );
+          } catch {
+            toast.error(
+              'Could not pay out the remaining credit — use Customers → Store Credit → Pay Out Cash',
+              { duration: 8000 },
+            );
+          }
+        }
+
         if (isLayby) {
           toast.success(
             `Lay By ${orderNumber} created. Deposit $${depositDue.toFixed(2)} received. Balance $${(totalWithDelivery - depositDue).toFixed(2)}.`,
@@ -1082,6 +1126,36 @@ export default function PaymentModal({
                 </button>
               </div>
             )}
+            {/* Exchange where the return is worth MORE than the new sale:
+                offer the leftover credit back as cash right here (Sally:
+                "the system only allows us to apply the credit, but we
+                need to refund the difference!"). Paid out automatically
+                when the sale completes and logged on the credit history. */}
+            {cart.exchangeFromOrderId &&
+              useStoreCredit &&
+              creditRemainderAfterSale > 0.005 && (
+                <div className="mt-3 pt-3 border-t border-purple-500/30">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={payOutRemainder}
+                      onChange={(e) => setPayOutRemainder(e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm text-purple-200">
+                      Refund the remaining{' '}
+                      <span className="font-bold">
+                        ${creditRemainderAfterSale.toFixed(2)}
+                      </span>{' '}
+                      to the customer as cash
+                    </span>
+                  </label>
+                  <p className="text-xs text-gray-400 mt-1 ml-6">
+                    Hand the cash from the till when the sale completes —
+                    it's deducted from their store credit and logged.
+                  </p>
+                </div>
+              )}
           </div>
         )}
 
