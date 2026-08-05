@@ -55,6 +55,12 @@ interface CartState {
   // exchange. The resulting order links back to the original.
   exchangeFromOrderId: number | null;
   exchangeFromOrderNumber: string | null;
+  // Quote-conversion context — set when the cart was loaded from an open
+  // quote. Quoted prices are locked (server told to trust them, trade
+  // auto-discounts suppressed) and the quote is marked CONVERTED once
+  // the order completes.
+  fromQuoteId: number | null;
+  fromQuoteNumber: string | null;
   cartDiscount: CartDiscount | null;
   subtotal: number;
   itemDiscounts: number;
@@ -77,6 +83,8 @@ const initialState: CartState = {
   customerIsTrade: false,
   exchangeFromOrderId: null,
   exchangeFromOrderNumber: null,
+  fromQuoteId: null,
+  fromQuoteNumber: null,
   cartDiscount: null,
   subtotal: 0,
   itemDiscounts: 0,
@@ -345,6 +353,54 @@ const cartSlice = createSlice({
       state.exchangeFromOrderNumber = action.payload?.orderNumber ?? null;
     },
 
+    // Replace the whole cart with an open quote's lines — quoted prices
+    // and discounts locked in exactly as negotiated. From here the sale
+    // proceeds like any other (backorder / lay-by ticks, payment).
+    loadQuote: (
+      state,
+      action: PayloadAction<{
+        quoteId: number;
+        quoteNumber: string;
+        customer?: { id: number; name: string; isTrade?: boolean } | null;
+        notes?: string;
+        items: Array<{
+          productId: number;
+          sku: string;
+          name: string;
+          quantity: number;
+          unitPrice: number;
+          discountPercent: number;
+        }>;
+      }>,
+    ) => {
+      const p = action.payload;
+      state.items = p.items.map((it) => ({
+        productId: it.productId,
+        sku: it.sku,
+        name: it.name,
+        quantity: Math.max(1, Number(it.quantity) || 1),
+        unitPrice: Math.max(0, Number(it.unitPrice) || 0),
+        // Quoted discount rides as the manual % — trade auto-discounts
+        // are suppressed for quote carts so nothing re-applies on top.
+        discountPercent: Math.max(0, Math.min(100, Number(it.discountPercent) || 0)),
+        autoDiscountPercent: 0,
+        autoDiscountLabel: null,
+        discountAmount: 0,
+        taxAmount: 0,
+        rowTotal: 0,
+      }));
+      state.customerId = p.customer?.id ?? null;
+      state.customerName = p.customer?.name ?? null;
+      state.customerIsTrade = !!p.customer?.isTrade;
+      state.fromQuoteId = p.quoteId;
+      state.fromQuoteNumber = p.quoteNumber;
+      state.exchangeFromOrderId = null;
+      state.exchangeFromOrderNumber = null;
+      state.cartDiscount = null;
+      state.notes = p.notes || '';
+      recalculateTotals(state);
+    },
+
     clearCart: (state) => {
       state.items = [];
       state.customerId = null;
@@ -352,6 +408,8 @@ const cartSlice = createSlice({
       state.customerIsTrade = false;
       state.exchangeFromOrderId = null;
       state.exchangeFromOrderNumber = null;
+      state.fromQuoteId = null;
+      state.fromQuoteNumber = null;
       state.cartDiscount = null;
       state.subtotal = 0;
       state.itemDiscounts = 0;
@@ -414,6 +472,7 @@ export const {
   setTradeAutoDiscounts,
   setNotes,
   setExchangeContext,
+  loadQuote,
   clearCart,
   setDelivery,
   applyCalculatedTotals,

@@ -765,6 +765,10 @@ export default function PaymentModal({
               : undefined,
           // Exchange link — set when this sale replaces a returned item.
           exchangeFromOrderId: cart.exchangeFromOrderId || undefined,
+          // Quote conversion: the cart carries the negotiated quoted
+          // prices — tell the server to trust them instead of re-pricing
+          // from the catalogue (which would also re-apply trade autos).
+          trustItemUnitPrices: cart.fromQuoteId ? true : undefined,
           items: cart.items.map((item) => {
             const isBack = !!backorderByProductId[item.productId];
             // If the top-level Lay By toggle is on with no per-line
@@ -826,6 +830,23 @@ export default function PaymentModal({
         }
 
         orderNumber = response.data.data.order.orderNumber;
+
+        // Close the loop on a quote conversion: flag the quote CONVERTED
+        // and link it to this order. Best-effort — the sale is committed.
+        if (cart.fromQuoteId) {
+          try {
+            await quotesApi.markConverted(
+              cart.fromQuoteId,
+              response.data.data.order.id,
+            );
+            toast.success(`Quote ${cart.fromQuoteNumber || ''} converted`.trim());
+          } catch {
+            toast.error(
+              'Order created, but the quote could not be marked converted — check the Quotes page',
+              { duration: 8000 },
+            );
+          }
+        }
 
         // Exchange difference: the return was worth more than this sale,
         // so pay the leftover credit back over the counter. Best-effort —

@@ -248,6 +248,11 @@ export const quotesApi = {
   // buyer is trade.
   tradeDiscountPreview: (productIds: number[]) =>
     api.post('/quotes/trade-discount-preview', { productIds }),
+
+  // Flag a quote CONVERTED and link the order that completed it — used
+  // by the POS checkout when the cart was loaded from a quote.
+  markConverted: (id: number, orderId: number) =>
+    api.patch(`/quotes/${id}/mark-converted`, { orderId }),
 };
 
 // Users API (Admin only)

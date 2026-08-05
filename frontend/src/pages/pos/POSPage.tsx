@@ -26,6 +26,7 @@ import {
   setCustomer,
   setTradeAutoDiscounts,
   setExchangeContext,
+  loadQuote,
 } from '../../store/slices/cartSlice';
 import ProductGrid from './components/ProductGrid';
 import CartPanel from './components/CartPanel';
@@ -61,7 +62,18 @@ export default function POSPage() {
         setExchangeContext({ orderId: ex.id, orderNumber: ex.orderNumber }),
       );
     }
-    if (preselect?.id || ex?.id) {
+    // Quote conversion: arriving from the Quotes page "Convert" button.
+    // Replaces the whole cart with the quote's lines at the quoted
+    // prices; from here it's a normal sale (backorder / lay-by / pay).
+    const lq = (location.state as any)?.loadQuote;
+    if (lq?.quoteId) {
+      dispatch(loadQuote(lq));
+      toast.success(
+        `Quote ${lq.quoteNumber} loaded — quoted prices locked. Take payment (or Lay By / Backorder) as usual.`,
+        { duration: 6000 },
+      );
+    }
+    if (preselect?.id || ex?.id || lq?.quoteId) {
       // Clear location state so a later navigation doesn't re-apply
       window.history.replaceState({}, document.title);
     }
@@ -347,6 +359,9 @@ export default function POSPage() {
   // (cartProductIdsKey is declared above and shared with the badge-pct fetch.)
   useEffect(() => {
     if (!cart.customerIsTrade) return;
+    // Quote-converted carts carry the negotiated quoted prices — do NOT
+    // re-apply trade auto-discounts on top of them.
+    if (cart.fromQuoteId) return;
     const ids = cart.items
       .map((i) => i.productId)
       .filter((id) => Number.isFinite(id) && id > 0);
@@ -514,6 +529,24 @@ export default function POSPage() {
     <div className="flex h-full">
       {/* Main Panel */}
       <div className="flex-1 min-w-0 flex flex-col p-4">
+        {/* Quote-conversion banner — cart loaded from an open quote. */}
+        {cart.fromQuoteNumber && (
+          <div className="mb-3 flex items-center justify-between rounded-lg border border-primary-500/40 bg-primary-500/10 px-4 py-2 text-sm">
+            <span className="text-primary-200">
+              Converting quote{' '}
+              <span className="font-bold">{cart.fromQuoteNumber}</span> — quoted
+              prices are locked in. Complete payment (or Lay By / Backorder) to
+              finish the conversion.
+            </span>
+            <button
+              className="text-primary-300 hover:text-white text-xs underline"
+              onClick={() => dispatch(clearCart())}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* Exchange banner — this sale replaces a returned item. */}
         {cart.exchangeFromOrderNumber && (
           <div className="mb-3 flex items-center justify-between rounded-lg border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm">

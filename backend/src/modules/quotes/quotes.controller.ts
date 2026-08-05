@@ -102,6 +102,33 @@ export class QuotesController {
     };
   }
 
+  // Close the loop on a POS-cart conversion: the checkout loaded this
+  // quote's lines into the cart and created a normal order; this flags
+  // the quote CONVERTED and links that order. Idempotent.
+  @Patch(':id/mark-converted')
+  @ApiOperation({
+    summary: 'Mark a quote converted, linking the order that completed it',
+  })
+  async markConverted(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { orderId: number },
+  ) {
+    const orderId = Number(body?.orderId);
+    if (!Number.isFinite(orderId) || orderId <= 0) {
+      throw new BadRequestException('orderId is required');
+    }
+    const quote = await this.quotesService.findById(id);
+    if (!quote) throw new BadRequestException('Quote not found');
+    if (quote.status === QuoteStatus.CONVERTED) {
+      return { success: true, data: { alreadyConverted: true } };
+    }
+    if (quote.status === QuoteStatus.CANCELLED) {
+      throw new BadRequestException('Quote is cancelled');
+    }
+    await this.quotesService.markConverted(id, orderId);
+    return { success: true, data: { alreadyConverted: false } };
+  }
+
   @Get(':id/convert-check')
   @ApiOperation({
     summary: 'Check whether a quote can be converted (stock + expiry)',

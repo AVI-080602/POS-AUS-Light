@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { quotesApi, customersApi, productsApi, settingsApi } from '../../services/api';
 import {
@@ -60,6 +61,7 @@ interface QuoteLineItem {
 const MIN_MARGIN_MULTIPLIER = 1.3;
 
 export default function QuotesPage() {
+  const navigate = useNavigate();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [isLoading, setIsLoading] = useState(true);
@@ -483,16 +485,69 @@ export default function QuotesPage() {
     setShowCreateModal(true);
   };
 
+  // Convert = load the quote into the POS cart and finish it like any
+  // other sale (backorder / lay-by ticks, payment, invoice). The quote
+  // is marked CONVERTED when that order completes.
   const openConvertFlow = async (quote: any) => {
     try {
       const res = await quotesApi.convertCheck(quote.id);
       const check = res.data.data;
-      setConvertData({ quote, check });
-      setConvertPaymentMethod('eftpos');
-      setConvertPaymentRef('');
-      setAllowBackorder(false);
-      setConvertFulfilment('full');
-      setConvertDeposit('');
+      if (check?.blockers?.expiredPastGrace) {
+        toast.error(
+          `Quote has expired beyond the ${check.blockers.expiredPastGrace.graceDays}-day grace period. Create a new quote.`,
+        );
+        return;
+      }
+      if (check?.blockers?.outOfStock) {
+        toast(
+          'Some items are out of stock — tick Backorder on those lines at checkout.',
+          { icon: '⚠️', duration: 6000 },
+        );
+      }
+      // Server-recomputed conversion prices: the quoted price unless the
+      // current catalogue price is LOWER (customer gets the better one).
+      const priceRows: any[] = check?.prices || [];
+      const items = (quote.items || []).map((it: any, i: number) => {
+        const row = priceRows.find((r) => r.productId === it.productId);
+        return {
+          // Custom quote lines have no product — send them as custom
+          // items (negative client id), same path as the Custom Item button.
+          productId: it.productId ?? -(Date.now() + i),
+          sku: it.sku || 'CUSTOM',
+          name: it.name,
+          quantity: it.quantity,
+          unitPrice: row
+            ? Number(row.effectiveUnitPrice)
+            : parseFloat(it.unitPrice),
+          discountPercent: row
+            ? Number(row.discountPercent) || 0
+            : parseFloat(it.discountPercent || 0),
+        };
+      });
+      if (items.length === 0) {
+        toast.error('This quote has no items to convert');
+        return;
+      }
+      navigate('/pos', {
+        state: {
+          loadQuote: {
+            quoteId: quote.id,
+            quoteNumber: quote.quoteNumber,
+            customer: quote.customer
+              ? {
+                  id: quote.customer.id,
+                  name: [quote.customer.firstName, quote.customer.lastName]
+                    .filter(Boolean)
+                    .join(' '),
+                  isTrade:
+                    quote.buyerType === 'trade' || !!quote.customer.isTrade,
+                }
+              : null,
+            notes: quote.notes || undefined,
+            items,
+          },
+        },
+      });
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Failed to check quote');
     }
