@@ -489,26 +489,37 @@ export default function CartPanel({
                           >
                             <PlusIcon className="h-4 w-4" />
                           </button>
-                          {/* Change-price button. Was the %-discount
-                              button, which was blocked on SALE/clearance
-                              lines — Sally: "change this red discount to
-                              staff changing the actual price, including
-                              sale items and Clearance". Opens the same
-                              unit-price editor as clicking the price;
-                              works on every line. The below-cost warning
-                              still fires and the backend still enforces
-                              the cost+30% floor for sales staff. */}
+                          {/* Item discount button. SALE/clearance items
+                              CAN be discounted — the cashier just gets a
+                              heads-up that the item is already marked
+                              down (was a hard block before). Still
+                              mutually exclusive with a cart-level
+                              discount (one-or-the-other rule), and the
+                              below-cost warning / cost+30% floor still
+                              apply to the discounted price. */}
                           <button
                             className={`w-8 h-8 rounded flex items-center justify-center ${
-                              item.priceEdited
+                              cartDiscount
+                                ? 'bg-red-900/50 text-red-400 cursor-not-allowed'
+                                : item.discountPercent > 0
                                 ? 'bg-green-600 text-white'
                                 : 'bg-pos-accent hover:bg-pos-bg text-gray-400'
                             }`}
                             onClick={() => {
-                              setEditingUnitPrice(item.productId);
-                              setUnitPriceInput(item.unitPrice.toFixed(2));
+                              if (cartDiscount) {
+                                toast.error('A further (cart) discount is already applied. Remove it first — only one discount type per sale.');
+                                return;
+                              }
+                              if (item.isSaleItem) {
+                                toast('Clearance / sale item — already marked down. Discount applies on top of the sale price.', {
+                                  icon: '⚠️',
+                                  duration: 4000,
+                                });
+                              }
+                              setEditingItemDiscount(item.productId);
+                              setItemDiscountValue(item.discountPercent.toString());
                             }}
-                            title="Change price"
+                            title="Apply item discount"
                           >
                             <TagIcon className="h-4 w-4" />
                           </button>
