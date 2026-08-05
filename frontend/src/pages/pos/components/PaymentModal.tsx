@@ -256,6 +256,36 @@ export default function PaymentModal({
   // to the customer as cash when the order completes. Defaults ON —
   // Sally: "we need to refund the difference!"
   const [payOutRemainder, setPayOutRemainder] = useState(true);
+  // Credit issued by the refund that STARTED this exchange. The cash
+  // payout is capped to it — the customer may hold older, unrelated
+  // store credit that must stay on the account, so "the difference" is
+  // this return's value minus the new sale, never the whole balance.
+  const [exchangeCreditAmount, setExchangeCreditAmount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!cart.exchangeFromOrderId) {
+      setExchangeCreditAmount(null);
+      return;
+    }
+    ordersApi
+      .getRefunds(cart.exchangeFromOrderId)
+      .then((r) => {
+        if (cancelled) return;
+        const refunds = r.data?.data?.refunds || [];
+        // Newest first — the exchange flow just created it.
+        setExchangeCreditAmount(
+          refunds.length ? Number(refunds[0].refundAmount) || 0 : 0,
+        );
+      })
+      .catch(() => {
+        // Unknown -> offer nothing rather than risk paying out the
+        // whole wallet; the manual Pay Out Cash button still exists.
+        if (!cancelled) setExchangeCreditAmount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cart.exchangeFromOrderId]);
 
   // Layby state. The 20% minimum and 90-day default are also enforced
   // server-side; these constants just drive the UI defaults.
@@ -508,12 +538,15 @@ export default function PaymentModal({
     0,
     Math.round((totalWithDelivery - creditApplied) * 100) / 100,
   );
-  // Credit left over AFTER this sale consumes its share — on an
-  // exchange this is money owed back to the customer (return worth
-  // more than the replacement).
+  // Money owed back on an exchange: THIS return's credit minus what the
+  // new sale consumed. Capped by the live balance, floored at zero, and
+  // never touches older unrelated credit the customer holds.
   const creditRemainderAfterSale = Math.max(
     0,
-    Math.round((storeCreditBalance - creditApplied) * 100) / 100,
+    Math.round(
+      (Math.min(exchangeCreditAmount ?? 0, storeCreditBalance) - creditApplied) *
+        100,
+    ) / 100,
   );
 
   const cashAmount = parseFloat(cashTendered) || 0;
@@ -896,11 +929,10 @@ export default function PaymentModal({
         // of leaving it sitting on the account.
         exchangeFromOrderNumber: cart.exchangeFromOrderNumber || undefined,
         creditApplied: creditApplied > 0 ? creditApplied : undefined,
+        // Same capped figure as the payout — this exchange's difference
+        // only, never the customer's unrelated credit balance.
         refundDueToCustomer: cart.exchangeFromOrderId
-          ? Math.max(
-              0,
-              Math.round((storeCreditBalance - creditApplied) * 100) / 100,
-            )
+          ? creditRemainderAfterSale
           : undefined,
       };
 
