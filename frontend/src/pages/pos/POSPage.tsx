@@ -463,6 +463,10 @@ export default function POSPage() {
           imageUrl: product.thumbnailUrl,
           isSaleItem: onSale,
           isBackorder: outOfStock,
+          // Both bases ride along so the cart can apply the
+          // customer-price-wins rule once trade discounts land.
+          retailSalePrice: effectiveProductPrice(product),
+          tradeBasePrice: Number(product.price),
         })
       );
     }

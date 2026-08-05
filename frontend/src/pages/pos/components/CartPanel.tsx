@@ -391,6 +391,10 @@ export default function CartPanel({
                       {(() => {
                         const pct = tradePctMap[item.productId] || 0;
                         if (pct <= 0) return null;
+                        // Line switched to the customer price because the
+                        // trade rate was dearer (customer-price-wins) —
+                        // the trade badge would be wrong, hide it.
+                        if ((item.autoDiscountPercent || 0) <= 0) return null;
                         const tradePrice =
                           Math.round(item.unitPrice * (1 - pct / 100) * 100) /
                           100;

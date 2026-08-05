@@ -22,6 +22,14 @@ export interface CartItem {
   // Cashier changed the actual unit price (tag button / price click).
   // Sent to the backend so the edited price is honoured at order time.
   priceEdited?: boolean;
+  // What a walk-in would pay right now (sale price when active, else
+  // retail) and the fixed retail the trade % is based on. Captured at
+  // add-to-cart time so the customer-price-wins rule can re-derive the
+  // right base whenever the trade discounts land: if trade base × (1 −
+  // trade %) is still dearer than the customer price, the customer
+  // price is charged instead (Sally row 367).
+  retailSalePrice?: number;
+  tradeBasePrice?: number;
   // Item was out of stock when it was added to cart. PaymentModal uses
   // this to default the "Backorder" checkbox to on, and — combined with
   // the manual toggle — this is what gets submitted as `isBackorder` on
@@ -150,10 +158,23 @@ const cartSlice = createSlice({
         imageUrl?: string;
         isSaleItem?: boolean;
         isBackorder?: boolean;
+        // Sale-aware customer price + fixed retail trade base — feed the
+        // customer-price-wins rule (see CartItem comments).
+        retailSalePrice?: number;
+        tradeBasePrice?: number;
       }>
     ) => {
-      const { productId, sku, name, price, imageUrl, isSaleItem, isBackorder } =
-        action.payload;
+      const {
+        productId,
+        sku,
+        name,
+        price,
+        imageUrl,
+        isSaleItem,
+        isBackorder,
+        retailSalePrice,
+        tradeBasePrice,
+      } = action.payload;
 
       const existingItem = state.items.find((i) => i.productId === productId);
 
@@ -162,6 +183,8 @@ const cartSlice = createSlice({
         // If we're adding a backorder copy of an item, upgrade the flag so
         // the cashier sees it tagged even if the first add was in-stock.
         if (isBackorder) existingItem.isBackorder = true;
+        if (retailSalePrice != null) existingItem.retailSalePrice = retailSalePrice;
+        if (tradeBasePrice != null) existingItem.tradeBasePrice = tradeBasePrice;
       } else {
         state.items.push({
           productId,
@@ -176,6 +199,8 @@ const cartSlice = createSlice({
           imageUrl,
           isSaleItem,
           isBackorder,
+          retailSalePrice,
+          tradeBasePrice,
         });
       }
 
@@ -279,8 +304,31 @@ const cartSlice = createSlice({
       const map = action.payload || {};
       state.items.forEach((it) => {
         const hit = map[it.productId];
-        it.autoDiscountPercent = hit ? hit.percent : 0;
-        it.autoDiscountLabel = hit ? hit.label : null;
+        let pct = hit ? hit.percent : 0;
+        let label = hit ? (hit.label as string | null) : null;
+        // Customer-price-wins (Sally row 367): when the trade rate off
+        // the fixed retail base still lands ABOVE what a walk-in would
+        // pay (deep sale), charge the customer price and drop the trade
+        // discount. Re-derives from the captured bases each time, so it
+        // works whether the trade customer was attached before or after
+        // the item was added. Skips cashier-re-priced lines.
+        if (
+          hit &&
+          !it.priceEdited &&
+          it.tradeBasePrice != null &&
+          it.retailSalePrice != null
+        ) {
+          const tradeNet = it.tradeBasePrice * (1 - pct / 100);
+          if (it.retailSalePrice < tradeNet) {
+            it.unitPrice = it.retailSalePrice;
+            pct = 0;
+            label = null;
+          } else {
+            it.unitPrice = it.tradeBasePrice;
+          }
+        }
+        it.autoDiscountPercent = pct;
+        it.autoDiscountLabel = label;
       });
       recalculateTotals(state);
     },

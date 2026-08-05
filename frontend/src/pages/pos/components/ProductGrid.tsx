@@ -1,5 +1,8 @@
 import { InformationCircleIcon } from '@heroicons/react/24/outline';
-import { isProductOnSale } from '../../../store/slices/productsSlice';
+import {
+  isProductOnSale,
+  effectiveProductPrice,
+} from '../../../store/slices/productsSlice';
 
 interface Product {
   id: number;
@@ -57,11 +60,17 @@ export default function ProductGrid({
           // Trade price is always computed off the fixed retail
           // (product.price), even when the item is on SALE — the trade
           // discount does not stack on top of the sale discount.
+          // Customer-price-wins: when a deep sale undercuts the trade
+          // rate, trade pays the sale price — hide the (dearer) trade
+          // badge so it can't mislead the cashier.
           const tradePct = tradePctMap[product.id] || 0;
-          const tradePrice =
+          let tradePrice =
             tradePct > 0
               ? Math.round(Number(product.price) * (1 - tradePct / 100) * 100) / 100
               : null;
+          if (tradePrice != null && effectiveProductPrice(product) <= tradePrice) {
+            tradePrice = null;
+          }
           return (
           <button
             key={product.id}

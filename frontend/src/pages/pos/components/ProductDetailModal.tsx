@@ -199,6 +199,9 @@ export default function ProductDetailModal({
                 // so trade never stacks on top of an active SALE price.
                 const tradePrice =
                   Math.round(Number(product.price) * (1 - pct / 100) * 100) / 100;
+                // Customer-price-wins: a deep sale below the trade rate
+                // means trade pays the sale price — hide the dearer badge.
+                if (effectiveProductPrice(product) <= tradePrice) return null;
                 return (
                   <span
                     className="text-xs font-bold px-2 py-0.5 rounded bg-yellow-400/20 text-yellow-300 border border-yellow-500/40"
