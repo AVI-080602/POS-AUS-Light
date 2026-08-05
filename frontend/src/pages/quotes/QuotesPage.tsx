@@ -95,6 +95,23 @@ export default function QuotesPage() {
   const [quoteBuyerType, setQuoteBuyerType] = useState<'trade' | 'customer'>('customer');
   const [editingQuoteId, setEditingQuoteId] = useState<number | null>(null);
 
+  // Address for the selected customer, editable on the quote form
+  // (Sally: "Need a field for Address"). Prefilled from the customer
+  // record; saved back to it when the quote is saved.
+  const emptyAddress = { street: '', city: '', state: '', postcode: '' };
+  const [custAddress, setCustAddress] = useState({ ...emptyAddress });
+  const [custAddressDirty, setCustAddressDirty] = useState(false);
+  useEffect(() => {
+    setCustAddress({
+      street: selectedCustomer?.billingStreet || '',
+      city: selectedCustomer?.billingCity || '',
+      state: selectedCustomer?.billingState || '',
+      postcode: selectedCustomer?.billingPostcode || '',
+    });
+    setCustAddressDirty(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer?.id]);
+
   // Inline "create new customer" panel for the quote modal. Previously
   // the quote could only attach an existing customer, so a brand-new
   // walk-in had nowhere to go (Sally: "Can not add another new customer
@@ -367,6 +384,29 @@ export default function QuotesPage() {
     setCreateError('');
     setIsSubmitting(true);
     try {
+      // Persist an edited address back to the customer record so it
+      // rides on the quote print and future orders. Best-effort — an
+      // address hiccup shouldn't stop the quote.
+      if (selectedCustomer?.id && custAddressDirty) {
+        try {
+          await customersApi.updateCustomer(selectedCustomer.id, {
+            billingStreet: custAddress.street.trim() || null,
+            billingCity: custAddress.city.trim() || null,
+            billingState: custAddress.state.trim() || null,
+            billingPostcode: custAddress.postcode.trim() || null,
+          });
+          setSelectedCustomer({
+            ...selectedCustomer,
+            billingStreet: custAddress.street.trim(),
+            billingCity: custAddress.city.trim(),
+            billingState: custAddress.state.trim(),
+            billingPostcode: custAddress.postcode.trim(),
+          });
+          setCustAddressDirty(false);
+        } catch {
+          toast.error('Could not save the customer address — quote continues');
+        }
+      }
       const payload = {
         customerId: selectedCustomer?.id || undefined,
         items: lineItems.map((li) => ({
@@ -990,21 +1030,73 @@ export default function QuotesPage() {
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-300 mb-2">Customer</label>
               {selectedCustomer ? (
-                <div className="flex items-center justify-between bg-pos-accent rounded-lg p-3">
-                  <div>
-                    <p className="font-medium">{selectedCustomer.firstName} {selectedCustomer.lastName}</p>
-                    <p className="text-sm text-gray-400">
-                      {selectedCustomer.email && <span>{selectedCustomer.email}</span>}
-                      {selectedCustomer.email && selectedCustomer.phone && <span> | </span>}
-                      {selectedCustomer.phone && <span>{selectedCustomer.phone}</span>}
-                    </p>
+                <div className="bg-pos-accent rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{selectedCustomer.firstName} {selectedCustomer.lastName}</p>
+                      <p className="text-sm text-gray-400">
+                        {selectedCustomer.email && <span>{selectedCustomer.email}</span>}
+                        {selectedCustomer.email && selectedCustomer.phone && <span> | </span>}
+                        {selectedCustomer.phone && <span>{selectedCustomer.phone}</span>}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}
+                      className="text-gray-400 hover:text-red-400"
+                    >
+                      <XMarkIcon className="h-5 w-5" />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}
-                    className="text-gray-400 hover:text-red-400"
-                  >
-                    <XMarkIcon className="h-5 w-5" />
-                  </button>
+                  {/* Address — editable here; written back to the customer
+                      record when the quote is saved. */}
+                  <div className="mt-3 pt-3 border-t border-gray-700">
+                    <label className="block text-xs text-gray-400 mb-1">Address</label>
+                    <input
+                      type="text"
+                      className="input w-full mb-2"
+                      placeholder="Street address"
+                      value={custAddress.street}
+                      onChange={(e) => {
+                        setCustAddress({ ...custAddress, street: e.target.value });
+                        setCustAddressDirty(true);
+                      }}
+                    />
+                    <div className="grid grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="Suburb / City"
+                        value={custAddress.city}
+                        onChange={(e) => {
+                          setCustAddress({ ...custAddress, city: e.target.value });
+                          setCustAddressDirty(true);
+                        }}
+                      />
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="State"
+                        value={custAddress.state}
+                        onChange={(e) => {
+                          setCustAddress({ ...custAddress, state: e.target.value });
+                          setCustAddressDirty(true);
+                        }}
+                      />
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="Postcode"
+                        value={custAddress.postcode}
+                        onChange={(e) => {
+                          setCustAddress({
+                            ...custAddress,
+                            postcode: e.target.value.replace(/\D/g, '').slice(0, 4),
+                          });
+                          setCustAddressDirty(true);
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div>
@@ -1898,6 +1990,19 @@ export default function QuotesPage() {
                       )}
                       {printingQuote.customer.phone && (
                         <p className="text-gray-600">{printingQuote.customer.phone}</p>
+                      )}
+                      {(printingQuote.customer.billingStreet ||
+                        printingQuote.customer.billingCity) && (
+                        <p className="text-gray-600">
+                          {[
+                            printingQuote.customer.billingStreet,
+                            printingQuote.customer.billingCity,
+                            printingQuote.customer.billingState,
+                            printingQuote.customer.billingPostcode,
+                          ]
+                            .filter(Boolean)
+                            .join(', ')}
+                        </p>
                       )}
                     </>
                   ) : (
