@@ -50,6 +50,24 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any, refunds?: any[]
   const creditApplied = (o.payments || [])
     .filter((p: any) => p.method === 'store_credit')
     .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  // Money actually taken (cash/EFTPOS/transfer). A layby/backorder
+  // reprint must show DEPOSIT + the true BALANCE owing, not re-bill the
+  // whole order ("the invoice doesn't tell how much the customer owes").
+  const paidNonCredit = (o.payments || [])
+    .filter((p: any) => p.method !== 'store_credit')
+    .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
+  const grandTotalNum = parseFloat(o.grandTotal);
+  const owingAfterAll = Math.max(
+    0,
+    Math.round((grandTotalNum - paidNonCredit - creditApplied) * 100) / 100,
+  );
+  const isPartiallyPaid = owingAfterAll > 0.005;
+  const takeNowSubtotal = (o.items || [])
+    .filter((it: any) => !it.isBackorder && !it.isLaybyHeld)
+    .reduce((s: number, it: any) => s + Number(it.rowTotal || 0), 0);
+  const hasDeferred = (o.items || []).some(
+    (it: any) => it.isBackorder || it.isLaybyHeld,
+  );
   const userName = o.user
     ? [o.user.firstName, o.user.lastName].filter(Boolean).join(' ').trim() ||
       o.user.username
@@ -85,5 +103,20 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any, refunds?: any[]
     // Present when the order detail endpoint attached exchange links
     // (this sale replaced goods returned on an earlier order).
     exchangeFromOrderNumber: o.exchangeFromOrder?.orderNumber || undefined,
+    // Deposit/balance split for partially-paid orders (layby, backorder
+    // deposits). InvoiceModal renders DEPOSIT + BALANCE-owing rows when
+    // balanceDue is present; fully paid orders keep the plain layout.
+    // balanceDue is pre-credit — InvoiceModal subtracts creditApplied.
+    amountPaid: isPartiallyPaid
+      ? Math.round(paidNonCredit * 100) / 100
+      : undefined,
+    balanceDue: isPartiallyPaid
+      ? Math.max(0, Math.round((grandTotalNum - paidNonCredit) * 100) / 100)
+      : undefined,
+    isLayby: (o.items || []).some((it: any) => it.isLaybyHeld) || o.orderType === 'layby',
+    isBackorder: (o.items || []).some((it: any) => it.isBackorder),
+    takeNowSubtotal: hasDeferred
+      ? Math.round(takeNowSubtotal * 100) / 100
+      : undefined,
   };
 }
