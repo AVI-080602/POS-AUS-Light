@@ -72,8 +72,12 @@ export default function QuotesPage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerResults, setCustomerResults] = useState<any[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  // Individual controlled inputs for the create-quote customer search
+  // Individual controlled inputs for the create-quote customer search.
+  // First/Last are separate fields (Sally row 383) — the search string
+  // sent to the API is the two joined, which the backend matches via
+  // CONCAT(firstName, ' ', lastName).
   const [custSearchName, setCustSearchName] = useState('');
+  const [custSearchLastName, setCustSearchLastName] = useState('');
   const [custSearchEmail, setCustSearchEmail] = useState('');
   const [custSearchPhone, setCustSearchPhone] = useState('');
   const [productSearch, setProductSearch] = useState('');
@@ -427,6 +431,7 @@ export default function QuotesPage() {
       setNewCustomer({ ...emptyNewCustomer });
       setCustomerSearch('');
       setCustSearchName('');
+      setCustSearchLastName('');
       setCustSearchEmail('');
       setCustSearchPhone('');
       setCustomerResults([]);
@@ -446,6 +451,7 @@ export default function QuotesPage() {
     setNewCustomer({ ...emptyNewCustomer });
     setCustomerSearch('');
     setCustSearchName('');
+    setCustSearchLastName('');
     setCustSearchEmail('');
     setCustSearchPhone('');
     setCustomerResults([]);
@@ -947,12 +953,12 @@ export default function QuotesPage() {
                 </div>
               ) : (
                 <div>
-                  <div className="grid grid-cols-3 gap-3 mb-2">
+                  <div className="grid grid-cols-4 gap-3 mb-2">
                     <div>
-                      <label className="block text-xs text-gray-400 mb-1">Customer Name</label>
+                      <label className="block text-xs text-gray-400 mb-1">First Name</label>
                       <input
                         type="text"
-                        placeholder="Search by name"
+                        placeholder="First name"
                         className="input"
                         autoComplete="off"
                         value={custSearchName}
@@ -960,7 +966,33 @@ export default function QuotesPage() {
                           setCustSearchName(e.target.value);
                           setCustSearchEmail('');
                           setCustSearchPhone('');
-                          setCustomerSearch(e.target.value);
+                          setCustomerSearch(
+                            [e.target.value, custSearchLastName]
+                              .filter(Boolean)
+                              .join(' ')
+                              .trim(),
+                          );
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Last Name</label>
+                      <input
+                        type="text"
+                        placeholder="Last name"
+                        className="input"
+                        autoComplete="off"
+                        value={custSearchLastName}
+                        onChange={(e) => {
+                          setCustSearchLastName(e.target.value);
+                          setCustSearchEmail('');
+                          setCustSearchPhone('');
+                          setCustomerSearch(
+                            [custSearchName, e.target.value]
+                              .filter(Boolean)
+                              .join(' ')
+                              .trim(),
+                          );
                         }}
                       />
                     </div>
@@ -975,6 +1007,7 @@ export default function QuotesPage() {
                         onChange={(e) => {
                           setCustSearchEmail(e.target.value);
                           setCustSearchName('');
+                          setCustSearchLastName('');
                           setCustSearchPhone('');
                           setCustomerSearch(e.target.value);
                         }}
@@ -991,6 +1024,7 @@ export default function QuotesPage() {
                         onChange={(e) => {
                           setCustSearchPhone(e.target.value);
                           setCustSearchName('');
+                          setCustSearchLastName('');
                           setCustSearchEmail('');
                           setCustomerSearch(e.target.value);
                         }}
@@ -1171,6 +1205,7 @@ export default function QuotesPage() {
                             setSelectedCustomer(c);
                             setCustomerSearch('');
                             setCustSearchName('');
+                            setCustSearchLastName('');
                             setCustSearchEmail('');
                             setCustSearchPhone('');
                             setCustomerResults([]);
