@@ -198,7 +198,34 @@ export default function OrderReviewModal({
                       <p className="text-xs text-gray-400 font-mono">{item.sku}</p>
                     </td>
                     <td className="px-3 py-2 text-center">{item.quantity}</td>
-                    <td className="px-3 py-2 text-right">${item.unitPrice.toFixed(2)}</td>
+                    {/* Discounted lines show the list price struck through
+                        with the net unit price beside it — same treatment
+                        as the cart sidebar (Sally: "$7.95 has a
+                        strike-through and displays the discount price"). */}
+                    <td className="px-3 py-2 text-right">
+                      {(() => {
+                        const pct = Math.max(
+                          item.discountPercent || 0,
+                          item.autoDiscountPercent || 0,
+                        );
+                        if (pct <= 0) {
+                          return <>${item.unitPrice.toFixed(2)}</>;
+                        }
+                        const net =
+                          Math.round(item.unitPrice * (1 - pct / 100) * 100) /
+                          100;
+                        return (
+                          <span className="inline-flex items-center gap-1.5 justify-end">
+                            <span className="text-gray-500 line-through">
+                              ${item.unitPrice.toFixed(2)}
+                            </span>
+                            <span className="font-semibold text-green-400">
+                              ${net.toFixed(2)}
+                            </span>
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-3 py-2 text-right font-medium">
                       ${item.rowTotal.toFixed(2)}
                     </td>
