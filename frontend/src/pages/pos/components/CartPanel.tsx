@@ -489,30 +489,26 @@ export default function CartPanel({
                           >
                             <PlusIcon className="h-4 w-4" />
                           </button>
-                          {/* Item discount button - blocked for SALE items
-                              and when a cart-level discount is already set
-                              (one-or-the-other rule). */}
+                          {/* Change-price button. Was the %-discount
+                              button, which was blocked on SALE/clearance
+                              lines — Sally: "change this red discount to
+                              staff changing the actual price, including
+                              sale items and Clearance". Opens the same
+                              unit-price editor as clicking the price;
+                              works on every line. The below-cost warning
+                              still fires and the backend still enforces
+                              the cost+30% floor for sales staff. */}
                           <button
                             className={`w-8 h-8 rounded flex items-center justify-center ${
-                              item.isSaleItem || cartDiscount
-                                ? 'bg-red-900/50 text-red-400 cursor-not-allowed'
-                                : item.discountPercent > 0
+                              item.priceEdited
                                 ? 'bg-green-600 text-white'
                                 : 'bg-pos-accent hover:bg-pos-bg text-gray-400'
                             }`}
                             onClick={() => {
-                              if (item.isSaleItem) {
-                                toast.error('Cannot discount a clearance / sale item — it is already marked down.');
-                                return;
-                              }
-                              if (cartDiscount) {
-                                toast.error('A further (cart) discount is already applied. Remove it first — only one discount type per sale.');
-                                return;
-                              }
-                              setEditingItemDiscount(item.productId);
-                              setItemDiscountValue(item.discountPercent.toString());
+                              setEditingUnitPrice(item.productId);
+                              setUnitPriceInput(item.unitPrice.toFixed(2));
                             }}
-                            title={item.isSaleItem ? 'No discount on SALE items' : 'Apply item discount'}
+                            title="Change price"
                           >
                             <TagIcon className="h-4 w-4" />
                           </button>

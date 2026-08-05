@@ -61,10 +61,13 @@ interface CreateOrderDto {
     // `quantity - laybyHeldQty` and a held item with qty `laybyHeldQty`.
     // Default = full quantity (entire line is held).
     laybyHeldQty?: number;
-    // Manual unit price override. Honoured only for backorder lines —
-    // catalogue items must be sold at their DB price (use discountPercent
-    // for adjustments instead).
+    // Manual unit price override. Honoured for backorder lines and for
+    // lines the cashier explicitly re-priced (priceEdited) — staff may
+    // change the actual price, including SALE/clearance items, with the
+    // cost+30% floor as the guard (hard block for sales staff).
     unitPrice?: number;
+    // Cashier changed the actual price on this line at the till.
+    priceEdited?: boolean;
     // Custom / one-off line item that isn't in the product catalogue
     // (e.g. cashier's "Custom Item" button, or a cut-to-length LED
     // strip). productId will be <= 0 (a client-generated negative
@@ -257,11 +260,13 @@ export class OrdersService {
         //      the quote-conversion flow so the locked-in quoted price
         //      flows through to the order. Without this, the backend
         //      rebuilds the order at current catalogue price and the
-        //      payment-mismatch check rejects the conversion.
-        // Non-backorder, untrusted lines always use the catalogue price;
-        // cashiers should use the discount flow for adjustments.
+        //      payment-mismatch check rejects the conversion. OR
+        //   3. the cashier explicitly re-priced the line (priceEdited) —
+        //      staff may change the actual price, SALE/clearance
+        //      included; the cost+30% floor below is the guard.
+        // Other lines always use the catalogue price.
         const resolvedUnitPrice =
-          (item.isBackorder || dto.trustItemUnitPrices) &&
+          (item.isBackorder || dto.trustItemUnitPrices || item.priceEdited) &&
           item.unitPrice != null &&
           Number(item.unitPrice) >= 0
             ? Number(item.unitPrice)
@@ -270,8 +275,11 @@ export class OrdersService {
         // discount only takes effect if it's higher. Zeroed when the
         // sale price already beat the trade rate (see tradeWins above) —
         // the base is the sale price there, so re-applying trade % on
-        // top would double-discount.
-        const appliedAutoDiscount = tradeWins ? autoDiscount : 0;
+        // top would double-discount. On a cashier-re-priced line the
+        // edited price IS the base (the cart applies the trade % to it),
+        // so the auto rate stays regardless of tradeWins.
+        const appliedAutoDiscount =
+          tradeWins || item.priceEdited ? autoDiscount : 0;
         const effectiveDiscount = Math.max(manualDiscount, appliedAutoDiscount);
         return {
           productId: item.productId,

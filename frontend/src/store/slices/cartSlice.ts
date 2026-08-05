@@ -19,6 +19,9 @@ export interface CartItem {
   rowTotal: number;
   imageUrl?: string;
   isSaleItem?: boolean;
+  // Cashier changed the actual unit price (tag button / price click).
+  // Sent to the backend so the edited price is honoured at order time.
+  priceEdited?: boolean;
   // Item was out of stock when it was added to cart. PaymentModal uses
   // this to default the "Backorder" checkbox to on, and — combined with
   // the manual toggle — this is what gets submitted as `isBackorder` on
@@ -216,10 +219,12 @@ const cartSlice = createSlice({
       recalculateTotals(state);
     },
 
-    // Allow the cashier to override the unit price on a cart line —
-    // needed for backorder/quote-style items where the catalogue price
-    // is $0 or out of date. Backend only honours overrides for items
-    // flagged isBackorder.
+    // Allow the cashier to change the actual unit price on any cart
+    // line — including SALE / clearance items (Sally row 358: "change
+    // this red discount to staff changing the actual price"). The
+    // priceEdited flag tells the backend to honour the sent price
+    // instead of re-pricing from the catalogue; the cost+30% floor
+    // still guards it server-side (hard block for sales staff).
     setItemUnitPrice: (
       state,
       action: PayloadAction<{ productId: number; unitPrice: number }>,
@@ -228,6 +233,10 @@ const cartSlice = createSlice({
       const item = state.items.find((i) => i.productId === productId);
       if (item) {
         item.unitPrice = Math.max(0, unitPrice);
+        item.priceEdited = true;
+        // A price change replaces any manual % discount — keeping both
+        // would double-dip. The trade auto % (company policy) stays.
+        item.discountPercent = 0;
       }
       recalculateTotals(state);
     },

@@ -761,9 +761,10 @@ export default function PaymentModal({
               isLaybyHeld: isHeld,
               laybyHeldQty: splitHeldQty,
               // Pass unitPrice so the server can honour manual overrides
-              // on backorder lines AND custom items (which have no
-              // catalogue row to fall back to).
+              // on backorder lines, custom items (no catalogue row to
+              // fall back to), and cashier-edited prices (priceEdited).
               unitPrice: item.unitPrice,
+              priceEdited: !!item.priceEdited,
               ...(isCustom
                 ? { isCustom: true, sku: item.sku, name: item.name }
                 : {}),
