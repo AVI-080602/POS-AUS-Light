@@ -129,6 +129,34 @@ export default function PaymentModal({
   const [customerName, setCustomerName] = useState(
     draftGet('customerName', cart.customerName || ''),
   );
+  // First / Last split for the retail customer form (Sally: split the
+  // name into two fields). customerName stays the single value all the
+  // downstream order/invoice/layby code reads — these two keep it in
+  // sync, same pattern as the trade First/Last fields.
+  const initialSplitName = (() => {
+    const parts = (draftGet('customerName', cart.customerName || '') || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    return [parts[0] || '', parts.slice(1).join(' ')];
+  })();
+  const [customerFirstName, setCustomerFirstName] = useState(
+    draftGet('customerFirstName', initialSplitName[0]),
+  );
+  const [customerLastName, setCustomerLastName] = useState(
+    draftGet('customerLastName', initialSplitName[1]),
+  );
+  const applyNameParts = (first: string, last: string) => {
+    setCustomerFirstName(first);
+    setCustomerLastName(last);
+    setCustomerName([first.trim(), last.trim()].filter(Boolean).join(' '));
+  };
+  useEffect(() => {
+    draftSet('customerFirstName', customerFirstName);
+  }, [customerFirstName]);
+  useEffect(() => {
+    draftSet('customerLastName', customerLastName);
+  }, [customerLastName]);
   const [customerPhone, setCustomerPhone] = useState(draftGet('customerPhone', ''));
   const [customerEmail, setCustomerEmail] = useState(draftGet('customerEmail', ''));
   const [customerStreet, setCustomerStreet] = useState(draftGet('customerStreet', ''));
@@ -201,6 +229,8 @@ export default function PaymentModal({
   const applyMatchedCustomer = (c: any) => {
     const fullName = [c.firstName, c.lastName].filter(Boolean).join(' ').trim();
     setCustomerName(fullName);
+    setCustomerFirstName(c.firstName || '');
+    setCustomerLastName(c.lastName || '');
     if (c.email) setCustomerEmail(c.email);
     if (c.billingStreet) setCustomerStreet(c.billingStreet);
     if (c.billingCity) setCustomerCity(c.billingCity);
@@ -571,7 +601,7 @@ export default function PaymentModal({
     // Validate customer details if customer type (skip when walk-in)
     if (buyerType === 'customer' && !walkIn) {
       if (!customerName.trim()) {
-        toast.error('Please enter customer name');
+        toast.error('Please enter the customer first name');
         return;
       }
       if (!customerPhone.trim()) {
@@ -1279,8 +1309,8 @@ export default function PaymentModal({
             </>
           ) : (
             // Phone first (so an existing customer can be recognised and
-            // their details pulled in), then name.
-            <div className="grid grid-cols-2 gap-3">
+            // their details pulled in), then First / Last name.
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1">
                   Phone * <span className="text-gray-500">(10 digits)</span>
@@ -1296,13 +1326,27 @@ export default function PaymentModal({
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-400 mb-1">Name *</label>
+                <label className="block text-xs text-gray-400 mb-1">First Name *</label>
                 <input
                   type="text"
                   className="input text-sm"
-                  placeholder="Customer name"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="First name"
+                  value={customerFirstName}
+                  onChange={(e) =>
+                    applyNameParts(e.target.value, customerLastName)
+                  }
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Last Name</label>
+                <input
+                  type="text"
+                  className="input text-sm"
+                  placeholder="Last name"
+                  value={customerLastName}
+                  onChange={(e) =>
+                    applyNameParts(customerFirstName, e.target.value)
+                  }
                 />
               </div>
             </div>
