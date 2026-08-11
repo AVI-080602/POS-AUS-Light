@@ -18,9 +18,10 @@ interface Supplier {
   rep: string | null;
   email: string | null;
   notes: string | null;
+  warrantyContact: string | null;
 }
 
-const empty = { name: '', phone: '', rep: '', email: '', notes: '' };
+const empty = { name: '', phone: '', rep: '', email: '', notes: '', warrantyContact: '' };
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -63,6 +64,7 @@ export default function SuppliersPage() {
       rep: s.rep || '',
       email: s.email || '',
       notes: s.notes || '',
+      warrantyContact: s.warrantyContact || '',
     });
     setShowModal(true);
   };
@@ -191,6 +193,30 @@ export default function SuppliersPage() {
                       {s.notes && (
                         <div className="text-xs text-gray-500 mt-1">{s.notes}</div>
                       )}
+                      {/* Warranty claims — form link, claims email, or
+                          in-store instruction, straight off Sally's
+                          warranty sheet. URLs/emails are clickable. */}
+                      {s.warrantyContact && (
+                        <div className="mt-2 text-xs rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5">
+                          <span className="font-semibold text-amber-300 uppercase tracking-wide mr-1.5">
+                            Warranty:
+                          </span>
+                          {/^https?:\/\/\S+$/i.test(s.warrantyContact.trim()) ? (
+                            <a
+                              href={s.warrantyContact.trim()}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-amber-200 underline break-all"
+                            >
+                              Open warranty claim form
+                            </a>
+                          ) : (
+                            <span className="text-amber-100 break-words">
+                              {s.warrantyContact}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-2">
@@ -267,6 +293,17 @@ export default function SuppliersPage() {
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
                   className="input"
                   rows={3}
+                />
+              </Field>
+              <Field label="Warranty Claims (form URL, email, or instruction)">
+                <textarea
+                  value={form.warrantyContact}
+                  onChange={(e) =>
+                    setForm({ ...form, warrantyContact: e.target.value })
+                  }
+                  className="input"
+                  rows={2}
+                  placeholder="e.g. https://…/warranty-claim-form or warranty@supplier.com.au or 'place in returns area'"
                 />
               </Field>
             </div>

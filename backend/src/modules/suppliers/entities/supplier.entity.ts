@@ -28,6 +28,13 @@ export class Supplier {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
+  // Where warranty claims for this supplier's products go — a claim
+  // form URL, a claims email, or an in-store instruction ("place in
+  // returns area and replace on the spot"). Sourced from Sally's
+  // warranty spreadsheet.
+  @Column({ name: 'warranty_contact', type: 'text', nullable: true })
+  warrantyContact: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

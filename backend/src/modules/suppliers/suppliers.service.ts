@@ -9,6 +9,7 @@ export interface CreateSupplierDto {
   rep?: string;
   email?: string;
   notes?: string;
+  warrantyContact?: string;
 }
 
 export type UpdateSupplierDto = Partial<CreateSupplierDto>;
@@ -62,6 +63,59 @@ const SEED_SUPPLIERS: CreateSupplierDto[] = [
   { name: 'VENCHA', phone: '02 8811 1622', rep: 'Charlie: 0418 837 065' },
 ];
 
+// Warranty claim destinations per supplier — verbatim from Sally's
+// warranty spreadsheet (Book1.xlsx, Aug 2026). The sheet's contact
+// column was misaligned for GMT / HAVIT / HUNTER PACIFIC / HUNZA
+// (each value belonged one row down) — corrected here per Avi.
+// Backfilled on boot into any supplier whose warrantyContact is NULL,
+// so staff edits are never overwritten. Matching is fuzzy on name
+// (case/whitespace/punctuation-insensitive); unmatched entries are
+// created so the data is never silently dropped.
+const WARRANTY_CONTACTS: Record<string, string> = {
+  'ADM\\MEANWELL': 'Place in returns',
+  'Alacio': 'See rep Adam',
+  'AQUALUX\\TELECTRAN':
+    'See Rep Steve or sales@havit.com.au or place in returns area and give customer replacement on the spot',
+  'BRIGHT GREEN':
+    'https://forms.monday.com/forms/4929d29d30b8b341b7db566883b1ba85?r=use1',
+  'BRILLIANT LIGHTING': 'https://brilliantlighting.com.au/pages/warranty',
+  'Calibo Fans': 'https://www.calibo.com.au/warranty',
+  'CLA': 'customerservice@clalighting.com.au',
+  'COUGAR Lighting': 'Mark MarkH@cougarlighting.com.au',
+  'DOMUS Lighting': 'https://domuslighting.com.au/warranty-claim-form/',
+  'EGLO Lighting':
+    'https://eglo.tradieconnect.me/admincustom/api/warrantyform1/?service=4700&serviceselect=4700&status=5',
+  'HAVIT Lighting': 'https://havit.com.au/pages/product-warranty-registration',
+  'HUNTER PACIFIC': 'https://hunterpacificinternational.com.au/warranty-form/',
+  'HUNZA Lighting':
+    'There is no warranty form, however they do have a PDF on their website that explains the Terms and Conditions, and the Procedure for claiming a warranty. https://hunzalighting.com/download/hunza-australia-only-warranty/',
+  'ICON FANS': 'sales@lightrays.com.au',
+  'IXL':
+    'https://www.ixlappliances.com.au/warranty.html?srsltid=AfmBOoqTOcyX8PcQSVRTBZpxsGvsraxNcSaje55DulchvrEhsSFdOrgy',
+  'LIGHTCO': 'Troy: sales@lightco.com.au',
+  'Lighting Inspirations': 'orders@lightinginspirations.com.au',
+  'MAYFIELD LAMPS': 'sales@mayfieldlighting.com.au',
+  'MECATOR':
+    'Place in the returns area and give the customer a replacement on the spot or Katy our rep',
+  'OMNI Globes':
+    'Place in the returns area and give the customer a replacement',
+  'ORIEL Lighting': 'sales@oriel-lighting.com.au or see Lucy',
+  'PHONIX Lighting (PHL)':
+    'Place in the returns area and give the customer a replacement on the spot or Katy our rep',
+  'SUNNY Lighting (SAL)': 'warranty@sal.net.au',
+  'SUPERLUX': 'info@superlux.com.au att: Jackie',
+  'TELBIX': 'Claims@telbix.com',
+  'TEC LED': 'teclec@onestream.com.au',
+  'TREND Lighting': 'Jim Kapsalis : jim@trendlighting.com.au',
+  'VENTAIR':
+    'https://ventair.tradieconnect.me/admincustom/api/warrantyform1/?service=4700&serviceselect=4700&status=5',
+  'VENCHA': 'https://www.vencha.net.au/page/15/vencha-warranty-claim-form',
+};
+
+// Case/whitespace/punctuation-insensitive key so "AQUALUX\ TELECTRAN"
+// and "Lighting  Inspirations" (double space) still match.
+const nameKey = (n: string) => n.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
 @Injectable()
 export class SuppliersService implements OnModuleInit {
   constructor(
@@ -76,6 +130,36 @@ export class SuppliersService implements OnModuleInit {
         SEED_SUPPLIERS.map((s) => this.supplierRepository.create(s)),
       );
     }
+    await this.backfillWarrantyContacts();
+  }
+
+  // Fill warrantyContact from the spreadsheet map wherever it's still
+  // NULL (never overwrites a staff edit — even a cleared '' value).
+  // Suppliers in the map that don't exist yet are created. Idempotent;
+  // runs on every boot so a redeploy picks up map additions.
+  private async backfillWarrantyContacts(): Promise<void> {
+    try {
+      const all = await this.supplierRepository.find();
+      const byKey = new Map(all.map((s) => [nameKey(s.name), s]));
+      for (const [name, contact] of Object.entries(WARRANTY_CONTACTS)) {
+        const existing = byKey.get(nameKey(name));
+        if (existing) {
+          if (existing.warrantyContact == null) {
+            await this.supplierRepository.update(existing.id, {
+              warrantyContact: contact,
+            });
+          }
+        } else {
+          await this.supplierRepository.save(
+            this.supplierRepository.create({ name, warrantyContact: contact }),
+          );
+        }
+      }
+    } catch (err) {
+      // Never let a seed hiccup stop the app booting.
+      // eslint-disable-next-line no-console
+      console.error('[suppliers] warranty-contact backfill failed:', err);
+    }
   }
 
   async create(data: CreateSupplierDto): Promise<Supplier> {
@@ -85,6 +169,7 @@ export class SuppliersService implements OnModuleInit {
       rep: data.rep?.trim() || null,
       email: data.email?.trim() || null,
       notes: data.notes?.trim() || null,
+      warrantyContact: data.warrantyContact?.trim() || null,
     });
     return this.supplierRepository.save(supplier);
   }
@@ -98,6 +183,8 @@ export class SuppliersService implements OnModuleInit {
     if (data.rep !== undefined) patch.rep = data.rep?.trim() || null;
     if (data.email !== undefined) patch.email = data.email?.trim() || null;
     if (data.notes !== undefined) patch.notes = data.notes?.trim() || null;
+    if (data.warrantyContact !== undefined)
+      patch.warrantyContact = data.warrantyContact?.trim() || null;
     await this.supplierRepository.update(id, patch);
     return this.supplierRepository.findOne({ where: { id } }) as Promise<Supplier>;
   }
