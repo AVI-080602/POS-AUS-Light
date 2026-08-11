@@ -138,8 +138,8 @@ export default function SuppliersPage() {
           <table className="w-full">
             <thead className="bg-pos-accent text-xs uppercase text-gray-400">
               <tr>
-                <th className="px-4 py-3 text-left">Name</th>
-                <th className="px-4 py-3 text-left">Phone</th>
+                <th className="px-4 py-3 text-left w-56">Name</th>
+                <th className="px-4 py-3 text-left w-40 whitespace-nowrap">Phone</th>
                 <th className="px-4 py-3 text-left">Rep / Contact</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -160,19 +160,19 @@ export default function SuppliersPage() {
               ) : (
                 suppliers.map((s) => (
                   <tr key={s.id} className="border-t border-gray-800 hover:bg-pos-accent/30">
-                    <td className="px-4 py-3 font-semibold">{s.name}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 font-semibold align-top">{s.name}</td>
+                    <td className="px-4 py-3 align-top">
                       {s.phone && (
                         <a
                           href={`tel:${s.phone.replace(/\s+/g, '')}`}
-                          className="flex items-center gap-1 text-primary-400 hover:underline"
+                          className="flex items-center gap-1 text-primary-400 hover:underline whitespace-nowrap"
                         >
                           <PhoneIcon className="h-4 w-4" />
                           {s.phone}
                         </a>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-300">
+                    <td className="px-4 py-3 text-sm text-gray-300 align-top">
                       {s.email && (
                         <div className="flex items-center gap-1">
                           <EnvelopeIcon className="h-4 w-4 text-gray-500" />
@@ -218,7 +218,7 @@ export default function SuppliersPage() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right align-top">
                       <div className="inline-flex items-center gap-2">
                         <button
                           onClick={() => openEdit(s)}
