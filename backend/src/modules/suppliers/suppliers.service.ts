@@ -124,13 +124,39 @@ export class SuppliersService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    const count = await this.supplierRepository.count();
-    if (count === 0) {
-      await this.supplierRepository.save(
-        SEED_SUPPLIERS.map((s) => this.supplierRepository.create(s)),
-      );
-    }
+    await this.ensureSeedSuppliers();
     await this.backfillWarrantyContacts();
+  }
+
+  // Make sure every supplier in the directory seed exists — additive
+  // only (matched by normalised name; existing rows are never touched),
+  // so a database seeded from an older, shorter list still converges on
+  // the full directory. Note: a supplier deleted from the UI that is
+  // still in this seed list will re-appear on the next deploy — remove
+  // it from the list here to delete it permanently.
+  private async ensureSeedSuppliers(): Promise<void> {
+    try {
+      const all = await this.supplierRepository.find();
+      const existing = new Set(all.map((s) => nameKey(s.name)));
+      const missing = SEED_SUPPLIERS.filter(
+        (s) => !existing.has(nameKey(s.name)),
+      );
+      if (missing.length > 0) {
+        await this.supplierRepository.save(
+          missing.map((s) => this.supplierRepository.create(s)),
+        );
+        // eslint-disable-next-line no-console
+        console.log(
+          `[suppliers] added ${missing.length} missing directory supplier(s): ${missing
+            .map((s) => s.name)
+            .join(', ')}`,
+        );
+      }
+    } catch (err) {
+      // Never let a seed hiccup stop the app booting.
+      // eslint-disable-next-line no-console
+      console.error('[suppliers] directory seed failed:', err);
+    }
   }
 
   // Fill warrantyContact from the spreadsheet map wherever it's still
