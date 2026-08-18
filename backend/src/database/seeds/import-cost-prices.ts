@@ -16,11 +16,17 @@ const dataSource = new DataSource({
   logging: false,
 });
 
-// One-time import of supplier cost prices from ALF_CostPrice_Comparison.xlsx
-// (exact-SKU-matched rows only). Re-running is safe/idempotent — it just
-// overwrites `cost` for the SKUs in the CSV.
+// Import of supplier cost prices (sku,cost CSV) into products.cost.
+// Re-running is safe/idempotent — it just overwrites `cost` for the SKUs
+// in the CSV. Pass a filename in data/ to pick the batch:
+//   npm run import:costs                                   (ALF, ex-GST, July 2026)
+//   npm run import:costs -- cost-prices-inc-gst-2026-08.csv  (inc-GST, Aug 2026)
+// NOTE: cost-prices-inc-gst-2026-08.csv switched the cost basis to
+// GST-INCLUSIVE (Sally, Aug 2026) — the cost+30% floor is a true 30%
+// margin against inc-GST sell prices from that import on.
 async function importCostPrices() {
-  const csvPath = path.join(__dirname, 'data', 'alf-cost-prices.csv');
+  const csvFile = process.argv[2] || 'alf-cost-prices.csv';
+  const csvPath = path.join(__dirname, 'data', csvFile);
   const rows = fs
     .readFileSync(csvPath, 'utf-8')
     .split('\n')
