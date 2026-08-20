@@ -38,7 +38,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     name: '2W 2835 Strip Lighting - IP20 / Per Metre - 3000K',
     retailPerM: 15.1525,
     tradePerM: 10.9725,
-    cutMm: 50,
+    cutMm: 500,
     maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 5,
@@ -48,7 +48,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     name: '4.8w IP20 24v DC 3000K COB Dotless LED Strip - Per Metre',
     retailPerM: 15.1525,
     tradePerM: 10.9725,
-    cutMm: 50,
+    cutMm: 500,
     maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 5,
@@ -58,7 +58,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     name: '9.6w IP67 24v DC 3000K COB Dotless LED Strip - Per Metre',
     retailPerM: 25.201,
     tradePerM: 18.249,
-    cutMm: 100,
+    cutMm: 500,
     maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 6,
@@ -68,7 +68,7 @@ const FALLBACK_STRIP_PRODUCTS: StripProduct[] = [
     name: '19.2w IP20 LED Strip 3000k - Per Metre',
     retailPerM: 46.893,
     tradePerM: 33.957,
-    cutMm: 50,
+    cutMm: 500,
     maxRunM: 1000,
     includedTailM: 1,
     tailPerM: 5,
@@ -116,6 +116,11 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
     FALLBACK_STRIP_PRODUCTS,
   );
   const [productId, setProductId] = useState(FALLBACK_STRIP_PRODUCTS[0].id);
+  // Searchable product picker — 165 strips is too many for a bare
+  // <select>. While open, the input holds the filter query; closed, it
+  // shows the selected product's name.
+  const [productQuery, setProductQuery] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Entered in METRES (decimals fine — 3.2 = 3200mm); converted to mm
   // internally for the cut-point rounding.
   const [lengthMStr, setLengthMStr] = useState('');
@@ -151,6 +156,15 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
   const product =
     products.find((p) => p.id === productId) ?? products[0] ?? FALLBACK_STRIP_PRODUCTS[0];
   const perM = isTrade ? product.tradePerM : product.retailPerM;
+
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
+    );
+  }, [products, productQuery]);
 
   // Round the requested length up to the next cut point, then compute
   // supplied metres + tail metres + total line price.
@@ -283,17 +297,65 @@ export default function StripCutModal({ onClose, onSendToCart }: Props) {
             <label className="block text-sm font-medium text-gray-400 mb-1">
               Product
             </label>
-            <select
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-              className="w-full border border-gray-700 bg-pos-bg rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <input
+                type="text"
+                value={pickerOpen ? productQuery : product.name}
+                onFocus={() => {
+                  setPickerOpen(true);
+                  setProductQuery('');
+                }}
+                onChange={(e) => {
+                  setProductQuery(e.target.value);
+                  setPickerOpen(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && filteredProducts.length > 0) {
+                    setProductId(filteredProducts[0].id);
+                    setPickerOpen(false);
+                    (e.target as HTMLInputElement).blur();
+                  } else if (e.key === 'Escape') {
+                    setPickerOpen(false);
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                onBlur={() => setTimeout(() => setPickerOpen(false), 150)}
+                placeholder={`Search ${products.length} strips — name or SKU`}
+                className="w-full border border-gray-700 bg-pos-bg rounded-md px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              {pickerOpen && (
+                <ul className="absolute z-20 mt-1 w-full max-h-64 overflow-y-auto bg-pos-card border border-gray-700 rounded-md shadow-xl">
+                  {filteredProducts.length === 0 ? (
+                    <li className="px-3 py-2 text-sm text-gray-500">
+                      No strips match “{productQuery}”
+                    </li>
+                  ) : (
+                    filteredProducts.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          // preventDefault stops the input's blur firing
+                          // before this click lands.
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setProductId(p.id);
+                            setPickerOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 hover:bg-pos-accent/40 ${
+                            p.id === productId ? 'text-amber-400' : 'text-white'
+                          }`}
+                        >
+                          <span className="block text-sm">{p.name}</span>
+                          <span className="block text-[11px] text-gray-500">
+                            {p.id} · ${p.retailPerM.toFixed(2)}/m retail
+                          </span>
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
 
             <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-400">
               <span>Rate <span className="font-bold text-white">${perM.toFixed(2)}</span>/m</span>
