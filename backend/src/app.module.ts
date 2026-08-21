@@ -21,6 +21,7 @@ import { SyncModule } from './modules/sync/sync.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { CompetitorModule } from './modules/competitor/competitor.module';
+import { PriceWatchModule } from './modules/price-watch/price-watch.module';
 
 // Database configuration
 import { getDatabaseConfig } from './database/database.config';
@@ -65,6 +66,7 @@ import { getDatabaseConfig } from './database/database.config';
     ReportsModule,
     SettingsModule,
     CompetitorModule,
+    PriceWatchModule,
   ],
 })
 export class AppModule {}

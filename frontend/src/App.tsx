@@ -18,6 +18,7 @@ import WarrantiesPage from './pages/warranties/WarrantiesPage';
 import ReportsPage from './pages/reports/ReportsPage';
 import SettingsPage from './pages/settings/SettingsPage';
 import UsersPage from './pages/users/UsersPage';
+import PriceWatchPage from './pages/price-watch/PriceWatchPage';
 
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -77,6 +78,14 @@ function App() {
           element={
             <AdminRoute>
               <SettingsPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/competitor-prices"
+          element={
+            <AdminRoute>
+              <PriceWatchPage />
             </AdminRoute>
           }
         />

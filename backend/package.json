@@ -25,7 +25,8 @@
     "seed": "ts-node src/database/seeds/run-seeds.ts",
     "import:costs": "ts-node src/database/seeds/import-cost-prices.ts",
     "import:havit-strip": "ts-node src/database/seeds/import-havit-strip-products.ts",
-    "import:led-strips": "ts-node src/database/seeds/import-led-strip-setting.ts"
+    "import:led-strips": "ts-node src/database/seeds/import-led-strip-setting.ts",
+    "import:supplier-costs": "ts-node src/database/seeds/import-supplier-costs.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",

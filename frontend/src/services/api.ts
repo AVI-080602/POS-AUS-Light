@@ -419,4 +419,22 @@ export const competitorApi = {
     api.get('/competitor/price', { params: { name: productName, sku } }),
 };
 
+// Price Watch dashboard (Admin only) — weekly competitor scrape results
+export interface PriceWatchFilters {
+  search?: string;
+  supplier?: string;
+  competitor?: string;
+  verdict?: string;
+  moversOnly?: boolean;
+}
+
+export const priceWatchApi = {
+  getSummary: () => api.get('/price-watch/summary'),
+  getProducts: (params: PriceWatchFilters & { page?: number; limit?: number }) =>
+    api.get('/price-watch/products', { params }),
+  // Blob so the authenticated download can be handed to the browser.
+  exportCsv: (params: PriceWatchFilters) =>
+    api.get('/price-watch/export', { params, responseType: 'blob' }),
+};
+
 export default api;

@@ -12,6 +12,7 @@ import {
   UserGroupIcon,
   BookOpenIcon,
   ShieldCheckIcon,
+  CurrencyDollarIcon,
 } from '@heroicons/react/24/outline';
 import { RootState, AppDispatch } from '../../store';
 import { logout } from '../../store/slices/authSlice';
@@ -32,6 +33,7 @@ const managerNavItems = [
 ];
 
 const adminNavItems = [
+  { to: '/competitor-prices', label: 'Prices', icon: CurrencyDollarIcon },
   { to: '/settings', label: 'Settings', icon: Cog6ToothIcon },
 ];
 
