@@ -24,6 +24,13 @@ export type CompetitorIndex = Map<string, CompetitorHit>;
 const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase();
 const PREFIX_RE = /^\d+-/;
 
+// "CLA-352-WH" -> "cla352wh". Separator-insensitive join used on both
+// sides of every match: supplier sheets, competitor skus and URL slugs
+// all disagree about hyphens (found via CLA-352-WH, which lives on
+// ceilingfansdirect only as slug tokens ...-cla-352-wh-34836).
+export const joinedAlnum = (s: unknown): string =>
+  String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -97,7 +104,11 @@ export async function shopifyIndex(label: string, site: string): Promise<Competi
       for (const v of p.variants ?? []) {
         const price = parseFloat(v.price);
         if (!Number.isFinite(price) || price <= 0) continue;
-        for (const k of [norm(v.sku), norm(String(v.sku ?? '').replace(PREFIX_RE, ''))]) {
+        for (const k of [
+          norm(v.sku),
+          norm(String(v.sku ?? '').replace(PREFIX_RE, '')),
+          joinedAlnum(v.sku),
+        ]) {
           if (k && !out.has(k)) out.set(k, { price, url });
         }
       }
@@ -145,7 +156,17 @@ export async function headlessIndex(
         const sell = parseFloat(p.salePrice ?? '') || parseFloat(p.price ?? '');
         if (!Number.isFinite(sell) || sell <= 0) continue;
         const url = p.slug ? `${front}/product/${p.slug}` : '';
-        for (const k of [norm(p.model), norm(p.modelRaw), norm(p.sku)]) {
+        const keys = [
+          norm(p.model),
+          norm(p.modelRaw),
+          norm(p.sku),
+          joinedAlnum(p.model),
+          joinedAlnum(p.sku),
+          // The slug often carries the manufacturer SKU as hyphenated
+          // tokens the API fields don't have — index its token runs.
+          ...slugRunKeys(String(p.slug ?? '')),
+        ];
+        for (const k of keys) {
           if (k && !out.has(k)) out.set(k, { price: sell, url });
         }
       }
@@ -178,12 +199,13 @@ export async function wooIndex(label: string, base: string): Promise<CompetitorI
     const data: any[] = r.data ?? [];
     if (data.length === 0) break;
     for (const p of data) {
-      const sku = norm(p.sku);
       const prices = p.prices ?? {};
       const minor = parseInt(prices.currency_minor_unit ?? '2', 10);
       const val = parseFloat(prices.price ?? '') / Math.pow(10, minor);
-      if (sku && Number.isFinite(val) && val > 0 && !out.has(sku)) {
-        out.set(sku, { price: Math.round(val * 100) / 100, url: p.permalink ?? '' });
+      if (!Number.isFinite(val) || val <= 0) continue;
+      const hit = { price: Math.round(val * 100) / 100, url: p.permalink ?? '' };
+      for (const k of [norm(p.sku), joinedAlnum(p.sku)]) {
+        if (k && !out.has(k)) out.set(k, hit);
       }
     }
     const totalPages = parseInt(r.headers?.['x-wp-totalpages'] ?? '0', 10);
@@ -194,38 +216,79 @@ export async function wooIndex(label: string, base: string): Promise<CompetitorI
   return out;
 }
 
-// ---------- onlinelighting (sitemap token match + page scrape) ----------
-// Same exact-token matching as Price_scraper/scrape_competitor_prices.py:
-// only SKU-looking tokens, ambiguity-guarded, no name fuzz.
+// ---------- slug token matching (onlinelighting, ceilingfansdirect) ----------
+// Same exact-token matching as Price_scraper/scrape_competitor_prices.py
+// (SKU-looking tokens only, ambiguity-guarded, no name fuzz), extended
+// with joined CONSECUTIVE TOKEN RUNS so hyphenated SKUs match: slug
+// "...-cla-352-wh-34836" indexes "cla352wh" and matches supplier SKU
+// "CLA-352-WH" via its joined form.
 
-export interface OlIndex {
+export interface SlugIndex {
   firstUrl: Map<string, string>;
   count: Map<string, number>;
 }
 
-export async function olBuildIndex(): Promise<OlIndex> {
-  const xml = (await getWithRetry('https://onlinelighting.com.au/sitemap.xml', 3, 60000))
-    .data as string;
-  const firstUrl = new Map<string, string>();
-  const count = new Map<string, number>();
-  let products = 0;
-  for (const m of xml.matchAll(
-    /<loc>(https:\/\/onlinelighting\.com\.au\/([^<]*\.html))<\/loc>/g,
-  )) {
-    products++;
-    const url = m[1];
-    const tokens = new Set(m[2].replace('.html', '').toLowerCase().split('-').filter(Boolean));
-    for (const t of tokens) {
-      if (!firstUrl.has(t)) firstUrl.set(t, url);
-      count.set(t, (count.get(t) ?? 0) + 1);
+// Keys a slug contributes: each token, plus every joined run of 2–4
+// consecutive tokens that contains a digit (SKUs always do) and is
+// specific enough (>=6 chars) not to collide with word pairs.
+export function slugRunKeys(slug: string): string[] {
+  const tokens = slug.toLowerCase().split('-').filter(Boolean);
+  const keys = new Set<string>(tokens);
+  for (let i = 0; i < tokens.length; i++) {
+    for (let len = 2; len <= 4 && i + len <= tokens.length; len++) {
+      const run = tokens.slice(i, i + len).join('');
+      if (run.length >= 6 && run.length <= 30 && /\d/.test(run)) keys.add(run);
     }
   }
-  logger.log(`onlinelighting: ${products} products indexed`);
+  return [...keys];
+}
+
+function buildSlugIndex(entries: Array<{ url: string; slug: string }>): SlugIndex {
+  const firstUrl = new Map<string, string>();
+  const count = new Map<string, number>();
+  for (const { url, slug } of entries) {
+    for (const k of slugRunKeys(slug)) {
+      if (!firstUrl.has(k)) firstUrl.set(k, url);
+      count.set(k, (count.get(k) ?? 0) + 1);
+    }
+  }
   return { firstUrl, count };
 }
 
-// Identifying model tokens from a supplier SKU: >=5 chars with a digit,
-// or pure digits >=4. Longest first — the real model number.
+export async function olBuildIndex(): Promise<SlugIndex> {
+  const xml = (await getWithRetry('https://onlinelighting.com.au/sitemap.xml', 3, 60000))
+    .data as string;
+  const entries: Array<{ url: string; slug: string }> = [];
+  for (const m of xml.matchAll(
+    /<loc>(https:\/\/onlinelighting\.com\.au\/([^<]*)\.html)<\/loc>/g,
+  )) {
+    entries.push({ url: m[1], slug: m[2] });
+  }
+  logger.log(`onlinelighting: ${entries.length} products indexed`);
+  return buildSlugIndex(entries);
+}
+
+// ceilingfansdirect's category API is broken (returns 0 products for
+// real categories, 22 Aug 2026) but its sitemap lists every product and
+// the pages are SSR'd with a JSON-LD price — so it gets the same
+// slug-match + page-scrape treatment as onlinelighting.
+export async function cfdBuildIndex(): Promise<SlugIndex> {
+  const xml = (
+    await getWithRetry('https://www.ceilingfansdirect.com.au/sitemap.xml', 3, 90000)
+  ).data as string;
+  const entries: Array<{ url: string; slug: string }> = [];
+  for (const m of xml.matchAll(
+    /<loc>(https?:\/\/[^<]*ceilingfansdirect\.com\.au\/product\/([^<\/]+))<\/loc>/g,
+  )) {
+    entries.push({ url: m[1], slug: m[2] });
+  }
+  logger.log(`ceilingfansdirect: ${entries.length} products indexed from sitemap`);
+  return buildSlugIndex(entries);
+}
+
+// Identifying tokens from a supplier SKU: >=5 chars with a digit, pure
+// digits >=4, plus the joined-alnum whole SKU (catches short-token SKUs
+// like CLA-352-WH). Longest first — the most specific key wins.
 function strongSkuTokens(sku: string): string[] {
   const parts = String(sku).trim().toLowerCase().split(/[^a-z0-9]+/);
   const out = new Set<string>();
@@ -234,15 +297,47 @@ function strongSkuTokens(sku: string): string[] {
     const hasDigit = /\d/.test(p);
     if ((p.length >= 5 && hasDigit) || (/^\d+$/.test(p) && p.length >= 4)) out.add(p);
   }
+  const joined = joinedAlnum(sku);
+  if (joined.length >= 6 && /\d/.test(joined)) out.add(joined);
   return [...out].sort((a, b) => b.length - a.length);
 }
 
-export function olFindUrl(sku: string, idx: OlIndex, maxAmbiguity = 6): string | null {
+export function slugFindUrl(sku: string, idx: SlugIndex, maxAmbiguity = 6): string | null {
   for (const tok of strongSkuTokens(sku)) {
     const url = idx.firstUrl.get(tok);
     if (url && (idx.count.get(tok) ?? 0) <= maxAmbiguity) return url;
   }
   return null;
+}
+
+// JSON-LD-only price extraction for SSR'd headless pages
+// (ceilingfansdirect / lightingillusions product pages).
+export async function jsonLdPrice(url: string): Promise<number | null> {
+  try {
+    const { data } = await axios.get(url, {
+      headers: { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml' },
+      timeout: 25000,
+    });
+    const $ = cheerio.load(data);
+    let price: number | null = null;
+    $('script[type="application/ld+json"]').each((_, el) => {
+      if (price) return;
+      try {
+        const j = JSON.parse($(el).html() || '');
+        const offers = Array.isArray(j?.offers) ? j.offers[0] : j?.offers;
+        const raw = offers?.price ?? (j?.['@type'] === 'Product' ? j?.price : undefined);
+        if (j?.['@type'] === 'Product' && raw != null) {
+          const p = parseFloat(raw);
+          if (Number.isFinite(p) && p > 0) price = p;
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+    return price;
+  } catch {
+    return null;
+  }
 }
 
 // CS-Cart product page price extraction (same selector list as the POS

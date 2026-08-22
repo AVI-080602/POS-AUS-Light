@@ -9,12 +9,16 @@ import { CompetitorPriceSnapshot } from './entities/competitor-price.entity';
 import { Product } from '../products/entities/product.entity';
 import {
   CompetitorIndex,
+  cfdBuildIndex,
   headlessIndex,
+  joinedAlnum,
+  jsonLdPrice,
   olBuildIndex,
-  olFindUrl,
   olScrapePrice,
   promisePool,
   shopifyIndex,
+  slugFindUrl,
+  SlugIndex,
   wooIndex,
 } from './price-watch.fetchers';
 
@@ -122,21 +126,13 @@ export class PriceWatchService {
             'https://backend.lightingillusions.com.au',
           ),
         ],
-        [
-          'ceilingfansdirect',
-          await headlessIndex(
-            'ceilingfansdirect',
-            'https://www.ceilingfansdirect.com.au',
-            'https://backend.ceilingfansdirect.com.au',
-          ),
-        ],
         ['ceilingfanswarehouse', await wooIndex('ceilingfanswarehouse', 'https://www.ceilingfanswarehouse.com.au')],
       ];
 
       for (const [label, idx] of indexed) {
         let n = 0;
         for (const sku of skus) {
-          const hit = idx.get(norm(sku));
+          const hit = idx.get(norm(sku)) ?? idx.get(joinedAlnum(sku));
           if (hit) {
             snapshots.push({ runId: run.id, sku, competitor: label, price: hit.price, url: hit.url });
             n++;
@@ -145,32 +141,43 @@ export class PriceWatchService {
         perCompetitor[label] = n;
       }
 
-      // onlinelighting: token-match then scrape each matched page once.
-      const olIdx = await olBuildIndex();
-      const urlBySku = new Map<string, string>();
-      for (const sku of skus) {
-        const url = olFindUrl(sku, olIdx);
-        if (url) urlBySku.set(sku, url);
-      }
-      const uniqueUrls = [...new Set(urlBySku.values())];
-      this.logger.log(`onlinelighting: ${urlBySku.size} SKU matches, ${uniqueUrls.length} pages to scrape`);
-      const priceByUrl = new Map<string, number | null>();
-      await promisePool(
-        uniqueUrls,
-        async (url) => {
-          priceByUrl.set(url, await olScrapePrice(url));
-        },
-        6,
-      );
-      let nOl = 0;
-      for (const [sku, url] of urlBySku) {
-        const price = priceByUrl.get(url);
-        if (price != null && price > 0) {
-          snapshots.push({ runId: run.id, sku, competitor: 'onlinelighting', price, url });
-          nOl++;
+      // onlinelighting + ceilingfansdirect: sitemap slug match, then
+      // scrape each matched page once (OL: CS-Cart selectors + JSON-LD;
+      // CFD: JSON-LD only — its category API is broken).
+      const slugSites: Array<{
+        label: CompetitorName;
+        idx: SlugIndex;
+        scrape: (url: string) => Promise<number | null>;
+      }> = [
+        { label: 'onlinelighting', idx: await olBuildIndex(), scrape: olScrapePrice },
+        { label: 'ceilingfansdirect', idx: await cfdBuildIndex(), scrape: jsonLdPrice },
+      ];
+      for (const { label, idx, scrape } of slugSites) {
+        const urlBySku = new Map<string, string>();
+        for (const sku of skus) {
+          const url = slugFindUrl(sku, idx);
+          if (url) urlBySku.set(sku, url);
         }
+        const uniqueUrls = [...new Set(urlBySku.values())];
+        this.logger.log(`${label}: ${urlBySku.size} SKU matches, ${uniqueUrls.length} pages to scrape`);
+        const priceByUrl = new Map<string, number | null>();
+        await promisePool(
+          uniqueUrls,
+          async (url) => {
+            priceByUrl.set(url, await scrape(url));
+          },
+          6,
+        );
+        let n = 0;
+        for (const [sku, url] of urlBySku) {
+          const price = priceByUrl.get(url);
+          if (price != null && price > 0) {
+            snapshots.push({ runId: run.id, sku, competitor: label, price, url });
+            n++;
+          }
+        }
+        perCompetitor[label] = n;
       }
-      perCompetitor['onlinelighting'] = nOl;
 
       for (let i = 0; i < snapshots.length; i += 500) {
         await this.snapshotRepo.insert(snapshots.slice(i, i + 500) as any);
