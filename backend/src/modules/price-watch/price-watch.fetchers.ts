@@ -179,8 +179,14 @@ export async function headlessIndex(
 }
 
 // ---------- WooCommerce Store API (ceilingfanswarehouse) ----------
+// Their sku field is almost entirely internal codes (0 of our 30k
+// supplier SKUs matched it, 23 Aug 2026) — but their /shop/ slugs
+// sometimes carry the manufacturer code, so slug-run keys are indexed
+// too (ambiguity-guarded, price straight from the same API row).
 export async function wooIndex(label: string, base: string): Promise<CompetitorIndex> {
   const out: CompetitorIndex = new Map();
+  const slugKeyed: Array<{ keys: string[]; hit: CompetitorHit }> = [];
+  const keyCount = new Map<string, number>();
   for (let page = 1; ; page++) {
     let r: any = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -207,12 +213,24 @@ export async function wooIndex(label: string, base: string): Promise<CompetitorI
       for (const k of [norm(p.sku), joinedAlnum(p.sku)]) {
         if (k && !out.has(k)) out.set(k, hit);
       }
+      const slugMatch = String(p.permalink ?? '').match(/\/shop\/([^/?#]+)/);
+      if (slugMatch) {
+        const keys = slugRunKeys(slugMatch[1]);
+        slugKeyed.push({ keys, hit });
+        for (const k of keys) keyCount.set(k, (keyCount.get(k) ?? 0) + 1);
+      }
     }
     const totalPages = parseInt(r.headers?.['x-wp-totalpages'] ?? '0', 10);
     if (totalPages && page >= totalPages) break;
     await sleep(200);
   }
-  logger.log(`${label}: ${out.size} skus`);
+  // Slug keys go in second (sku keys win on collision), ambiguity <=6.
+  for (const { keys, hit } of slugKeyed) {
+    for (const k of keys) {
+      if ((keyCount.get(k) ?? 99) <= 6 && !out.has(k)) out.set(k, hit);
+    }
+  }
+  logger.log(`${label}: ${out.size} keys`);
   return out;
 }
 
@@ -286,6 +304,14 @@ export async function cfdBuildIndex(): Promise<SlugIndex> {
   return buildSlugIndex(entries);
 }
 
+// Spec tokens masquerading as model numbers: colour temps (3000k),
+// wattages (16w), voltages (240v), lengths (1300mm), IP ratings —
+// descriptive supplier "SKUs" like "Globes 6W E27 3000K" are full of
+// them and they false-match accessory pages (found via a CFW light kit
+// matching every 3000K globe).
+const SPEC_TOKEN = /^(?:\d{1,4}(?:k|w|v|va|lm|ma|mm|cm|hz)|ip\d{2})$/;
+const SPEC_NUMBERS = new Set(['2700', '3000', '4000', '5000', '5500', '6000', '6500']);
+
 // Identifying tokens from a supplier SKU: >=5 chars with a digit, pure
 // digits >=4, plus the joined-alnum whole SKU (catches short-token SKUs
 // like CLA-352-WH). Longest first — the most specific key wins.
@@ -293,7 +319,7 @@ function strongSkuTokens(sku: string): string[] {
   const parts = String(sku).trim().toLowerCase().split(/[^a-z0-9]+/);
   const out = new Set<string>();
   for (const p of parts) {
-    if (!p) continue;
+    if (!p || SPEC_TOKEN.test(p) || SPEC_NUMBERS.has(p)) continue;
     const hasDigit = /\d/.test(p);
     if ((p.length >= 5 && hasDigit) || (/^\d+$/.test(p) && p.length >= 4)) out.add(p);
   }
