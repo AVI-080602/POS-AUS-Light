@@ -66,6 +66,33 @@ async function getWithRetry(url: string, attempts = 3, timeout = 60000) {
   throw lastErr;
 }
 
+// Fetch a sitemap and, when it's a <sitemapindex> of child sitemaps
+// rather than a flat <urlset>, fetch every child and concatenate. Some
+// hosts serve the flat form to one client and the index form to
+// another (ceilingfansdirect does exactly this — flat from a home
+// connection, index from the VPS), so every sitemap read goes through
+// here.
+async function fetchSitemapDeep(url: string, timeout = 90000): Promise<string> {
+  let xml = (await getWithRetry(url, 3, timeout)).data as string;
+  if (xml.includes('<sitemapindex')) {
+    const children = [...xml.matchAll(/<loc>\s*([^<]+\.xml[^<]*)\s*<\/loc>/g)]
+      .map((m) => m[1].trim())
+      .slice(0, 50);
+    logger.log(`sitemap index at ${url}: fetching ${children.length} children`);
+    const parts: string[] = [];
+    for (const child of children) {
+      try {
+        parts.push((await getWithRetry(child, 2, timeout)).data as string);
+      } catch {
+        logger.warn(`sitemap child failed: ${child}`);
+      }
+      await sleep(150);
+    }
+    xml = parts.join('\n');
+  }
+  return xml;
+}
+
 // ---------- Shopify (bestbuylighting, lights4less) ----------
 // /products.json pagination; the platform 400s past page 100 — that is
 // the end of what pagination can reach, not a failure.
@@ -129,7 +156,7 @@ export async function headlessIndex(
   front: string,
   backend: string,
 ): Promise<CompetitorIndex> {
-  const sm = (await getWithRetry(`${front}/sitemap.xml`, 3, 90000)).data as string;
+  const sm = await fetchSitemapDeep(`${front}/sitemap.xml`);
   const cats = [...new Set([...sm.matchAll(/\/category\/([a-z0-9-]+)/gi)].map((m) => m[1]))].sort();
   logger.log(`${label}: ${cats.length} categories`);
   const out: CompetitorIndex = new Map();
@@ -274,8 +301,7 @@ function buildSlugIndex(entries: Array<{ url: string; slug: string }>): SlugInde
 }
 
 export async function olBuildIndex(): Promise<SlugIndex> {
-  const xml = (await getWithRetry('https://onlinelighting.com.au/sitemap.xml', 3, 60000))
-    .data as string;
+  const xml = await fetchSitemapDeep('https://onlinelighting.com.au/sitemap.xml', 60000);
   const entries: Array<{ url: string; slug: string }> = [];
   for (const m of xml.matchAll(
     /<loc>(https:\/\/onlinelighting\.com\.au\/([^<]*)\.html)<\/loc>/g,
@@ -291,9 +317,7 @@ export async function olBuildIndex(): Promise<SlugIndex> {
 // the pages are SSR'd with a JSON-LD price — so it gets the same
 // slug-match + page-scrape treatment as onlinelighting.
 export async function cfdBuildIndex(): Promise<SlugIndex> {
-  const xml = (
-    await getWithRetry('https://www.ceilingfansdirect.com.au/sitemap.xml', 3, 90000)
-  ).data as string;
+  const xml = await fetchSitemapDeep('https://www.ceilingfansdirect.com.au/sitemap.xml');
   const entries: Array<{ url: string; slug: string }> = [];
   for (const m of xml.matchAll(
     /<loc>(https?:\/\/[^<]*ceilingfansdirect\.com\.au\/product\/([^<\/]+))<\/loc>/g,
