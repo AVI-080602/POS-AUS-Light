@@ -316,13 +316,16 @@ export async function olBuildIndex(): Promise<SlugIndex> {
 // real categories, 22 Aug 2026) but its sitemap lists every product and
 // the pages are SSR'd with a JSON-LD price — so it gets the same
 // slug-match + page-scrape treatment as onlinelighting.
+// NOTE their sitemap <loc>s are scheme-less ("www.ceilingfansdirect...")
+// — the regex must not require https://.
 export async function cfdBuildIndex(): Promise<SlugIndex> {
   const xml = await fetchSitemapDeep('https://www.ceilingfansdirect.com.au/sitemap.xml');
   const entries: Array<{ url: string; slug: string }> = [];
   for (const m of xml.matchAll(
-    /<loc>(https?:\/\/[^<]*ceilingfansdirect\.com\.au\/product\/([^<\/]+))<\/loc>/g,
+    /<loc>\s*((?:https?:\/\/)?(?:www\.)?ceilingfansdirect\.com\.au\/product\/([^<\s\/]+?))\s*<\/loc>/g,
   )) {
-    entries.push({ url: m[1], slug: m[2] });
+    const url = m[1].startsWith('http') ? m[1] : `https://${m[1]}`;
+    entries.push({ url, slug: m[2] });
   }
   logger.log(`ceilingfansdirect: ${entries.length} products indexed from sitemap`);
   return buildSlugIndex(entries);
