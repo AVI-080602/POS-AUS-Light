@@ -500,9 +500,6 @@ export default function OrdersPage() {
     }
   };
 
-  const isRefundable = (status: string) =>
-    status !== 'refunded' && status !== 'cancelled';
-
   const openLaybyPay = async (order: Order) => {
     try {
       // Pull the full order alongside the balance so the payment screen
@@ -776,11 +773,15 @@ export default function OrdersPage() {
                           <BanknotesIcon className="h-5 w-5" />
                         </button>
                       )}
-                      {canRefund && isRefundable(order.status) && (
+                      {/* Shown for EVERY status (Sally, 25 Aug: "Staff
+                          need to open and edit all orders") — on fully
+                          refunded orders the modal simply has nothing
+                          left to select, but Add Lights still works. */}
+                      {canRefund && (
                         <button
                           onClick={() => openRefundModal(order)}
                           className="p-2 hover:bg-orange-500/20 text-orange-400 rounded"
-                          title="Refund"
+                          title="Refund / Edit Order"
                         >
                           <ArrowUturnLeftIcon className="h-5 w-5" />
                         </button>
@@ -1683,6 +1684,21 @@ export default function OrdersPage() {
                 >
                   Cancel
                 </button>
+                {/* Add Lights (Sally, 25 Aug): customer collecting a
+                    backorder wants to add products or change qty —
+                    jump to the item editor for this order. The server
+                    still refuses edits on completed/refunded orders. */}
+                <button
+                  className="btn-primary bg-green-600 hover:bg-green-700"
+                  onClick={() => {
+                    setEditItemsOrder(refundOrder);
+                    setRefundOrder(null);
+                  }}
+                  disabled={isProcessingRefund}
+                  title="Add products to this order or change quantities"
+                >
+                  Add Lights
+                </button>
                 {/* Exchange: return to store credit + go to POS to ring
                     the replacement (needs a linked customer). */}
                 <button
@@ -1706,11 +1722,8 @@ export default function OrdersPage() {
                   onClick={() => processRefund(false)}
                   disabled={isProcessingRefund || refundTotal === 0}
                 >
-                  {isProcessingRefund
-                    ? 'Processing...'
-                    : refundAsCash
-                      ? 'Process Refund'
-                      : 'Refund Credits'}
+                  {/* Sally, 25 Aug: orange button reads just "Refund" */}
+                  {isProcessingRefund ? 'Processing...' : 'Refund'}
                 </button>
               </div>
             </div>
