@@ -30,6 +30,18 @@ export class SyncController {
     };
   }
 
+  // Live progress of the running (or last finished) sync — polled by
+  // the Settings page to draw the progress bar.
+  @Get('progress')
+  @Roles(RoleNames.ADMIN, RoleNames.MANAGER)
+  @ApiOperation({ summary: 'Live progress of the current/last sync run' })
+  getProgress() {
+    return {
+      success: true,
+      data: this.syncService.getSyncProgress(),
+    };
+  }
+
   @Get('test-connection')
   @Roles(RoleNames.ADMIN)
   @ApiOperation({ summary: 'Test Magento connection' })

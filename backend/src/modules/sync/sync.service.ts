@@ -157,8 +157,60 @@ export class SyncService {
     }
   }
 
+  // ---- live sync progress, polled by Settings → Magento Sync ----
+  // In-memory only: survives for the life of the process, shows the
+  // current run while it works and the last result after it finishes.
+  private syncProgress: {
+    task: string;
+    phase: string;
+    current: number;
+    total: number;
+    startedAt: string;
+    finishedAt: string | null;
+    success: boolean | null;
+    message: string | null;
+  } | null = null;
+
+  getSyncProgress() {
+    return this.syncProgress;
+  }
+
+  private progressStart(task: string, phase: string) {
+    this.syncProgress = {
+      task,
+      phase,
+      current: 0,
+      total: 0,
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+      success: null,
+      message: null,
+    };
+  }
+
+  private progressPhase(phase: string, total = 0) {
+    if (this.syncProgress) {
+      this.syncProgress.phase = phase;
+      this.syncProgress.total = total;
+      this.syncProgress.current = 0;
+    }
+  }
+
+  private progressTick() {
+    if (this.syncProgress) this.syncProgress.current++;
+  }
+
+  private progressEnd(success: boolean, message: string) {
+    if (this.syncProgress) {
+      this.syncProgress.finishedAt = new Date().toISOString();
+      this.syncProgress.success = success;
+      this.syncProgress.message = message;
+    }
+  }
+
   async syncCategories(): Promise<SyncResult> {
     this.logger.log('Starting category sync...');
+    this.progressStart('categories', 'Syncing categories from Magento…');
     const errors: string[] = [];
     let categoriesCreated = 0;
     let categoriesUpdated = 0;
@@ -247,18 +299,22 @@ export class SyncService {
       // Log the sync
       await this.logSync('categories', categoriesCreated + categoriesUpdated, errors.length === 0);
 
+      const message = `Category sync completed: ${categoriesCreated} created, ${categoriesUpdated} updated`;
+      this.progressEnd(errors.length === 0, message);
       return {
         success: errors.length === 0,
-        message: `Category sync completed: ${categoriesCreated} created, ${categoriesUpdated} updated`,
+        message,
         categoriesCreated,
         categoriesUpdated,
         errors: errors.length > 0 ? errors : undefined,
       };
     } catch (error) {
       this.logger.error('Category sync failed', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.progressEnd(false, message);
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message,
         errors: [String(error)],
       };
     }
@@ -266,6 +322,7 @@ export class SyncService {
 
   async syncProducts(): Promise<SyncResult> {
     this.logger.log('Starting product sync...');
+    this.progressStart('products', 'Fetching catalogue from Magento…');
     const errors: string[] = [];
     let productsCreated = 0;
     let productsUpdated = 0;
@@ -277,9 +334,11 @@ export class SyncService {
       await this.loadBrandOptions();
 
       const magentoProducts = await this.magentoService.fetchAllProducts();
+      this.progressPhase('Saving products to POS', magentoProducts.length);
 
       // First pass: sync all products
       for (const magentoProd of magentoProducts) {
+        this.progressTick();
         try {
           await this.syncSingleProduct(magentoProd);
 
@@ -305,18 +364,24 @@ export class SyncService {
       // Log the sync
       await this.logSync('products', productsCreated + productsUpdated, errors.length === 0);
 
+      const message =
+        `Product sync completed: ${productsCreated} created, ${productsUpdated} updated` +
+        (errors.length > 0 ? ` (${errors.length} errors)` : '');
+      this.progressEnd(errors.length === 0, message);
       return {
         success: errors.length === 0,
-        message: `Product sync completed: ${productsCreated} created, ${productsUpdated} updated`,
+        message,
         productsCreated,
         productsUpdated,
         errors: errors.length > 0 ? errors : undefined,
       };
     } catch (error) {
       this.logger.error('Product sync failed', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.progressEnd(false, message);
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message,
         errors: [String(error)],
       };
     }
@@ -477,14 +542,17 @@ export class SyncService {
 
   async syncCustomers(): Promise<SyncResult> {
     this.logger.log('Starting customer sync...');
+    this.progressStart('customers', 'Fetching customers from Magento…');
     const errors: string[] = [];
     let customersCreated = 0;
     let customersUpdated = 0;
 
     try {
       const magentoCustomers = await this.magentoService.fetchAllCustomers();
+      this.progressPhase('Saving customers to POS', magentoCustomers.length);
 
       for (const magentoCust of magentoCustomers) {
+        this.progressTick();
         try {
           await this.syncSingleCustomer(magentoCust);
 
@@ -507,18 +575,22 @@ export class SyncService {
       // Log the sync
       await this.logSync('customers', customersCreated + customersUpdated, errors.length === 0);
 
+      const message = `Customer sync completed: ${customersCreated} created, ${customersUpdated} updated`;
+      this.progressEnd(errors.length === 0, message);
       return {
         success: errors.length === 0,
-        message: `Customer sync completed: ${customersCreated} created, ${customersUpdated} updated`,
+        message,
         customersCreated,
         customersUpdated,
         errors: errors.length > 0 ? errors : undefined,
       };
     } catch (error) {
       this.logger.error('Customer sync failed', error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.progressEnd(false, message);
       return {
         success: false,
-        message: error instanceof Error ? error.message : 'Unknown error',
+        message,
         errors: [String(error)],
       };
     }

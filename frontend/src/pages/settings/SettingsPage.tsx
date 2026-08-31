@@ -119,6 +119,18 @@ export default function SettingsPage() {
   } | null>(null);
   const [syncRunning, setSyncRunning] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Live progress of the current/last background sync (categories /
+  // products / customers). Polled every 3s while the sync tab is open.
+  const [liveProgress, setLiveProgress] = useState<{
+    task: string;
+    phase: string;
+    current: number;
+    total: number;
+    startedAt: string;
+    finishedAt: string | null;
+    success: boolean | null;
+    message: string | null;
+  } | null>(null);
 
   useEffect(() => {
     fetchSettings();
@@ -237,6 +249,30 @@ export default function SettingsPage() {
       setIsSaving(false);
     }
   };
+
+  // Poll the live sync progress while the Magento Sync tab is open;
+  // when a run finishes, refresh the status cards once.
+  useEffect(() => {
+    if (activeTab !== 'sync') return;
+    let prevFinished: string | null | undefined;
+    const tick = async () => {
+      try {
+        const r = await syncApi.getProgress();
+        const p = r.data?.data ?? null;
+        setLiveProgress(p);
+        if (p?.finishedAt && prevFinished === null) {
+          const s = await syncApi.getStatus();
+          setSyncStatus(s.data.data);
+        }
+        prevFinished = p?.finishedAt ?? undefined;
+      } catch {
+        // transient poll errors are fine
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 3000);
+    return () => clearInterval(iv);
+  }, [activeTab]);
 
   const handleSync = async (type: 'categories' | 'products' | 'customers' | 'orders' | 'push-orders' | 'stock' | 'full' | 'clear-and-sync') => {
     setSyncRunning(type);
@@ -1231,6 +1267,69 @@ export default function SettingsPage() {
                   <div className="text-gray-400">Loading status...</div>
                 )}
               </div>
+
+              {/* Live progress of the running (or last) sync */}
+              {liveProgress && (
+                <div className="card p-6">
+                  {!liveProgress.finishedAt ? (
+                    (() => {
+                      const pct =
+                        liveProgress.total > 0
+                          ? Math.min(100, Math.round((liveProgress.current / liveProgress.total) * 100))
+                          : null;
+                      const elapsedS = Math.max(
+                        1,
+                        Math.round((Date.now() - new Date(liveProgress.startedAt).getTime()) / 1000),
+                      );
+                      const rate = liveProgress.current / elapsedS;
+                      const etaS =
+                        pct !== null && liveProgress.current > 20 && rate > 0
+                          ? Math.round((liveProgress.total - liveProgress.current) / rate)
+                          : null;
+                      const fmt = (s: number) =>
+                        s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+                      return (
+                        <>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="font-semibold flex items-center gap-2">
+                              <ArrowPathIcon className="h-5 w-5 animate-spin text-primary-400" />
+                              {liveProgress.phase}
+                            </div>
+                            <div className="text-sm text-gray-400">
+                              {pct !== null
+                                ? `${liveProgress.current.toLocaleString()} / ${liveProgress.total.toLocaleString()} (${pct}%)`
+                                : `running ${fmt(elapsedS)}…`}
+                              {etaS !== null && ` · ~${fmt(etaS)} left`}
+                            </div>
+                          </div>
+                          <div className="h-3 bg-pos-accent rounded-full overflow-hidden">
+                            {pct !== null ? (
+                              <div
+                                className="h-full bg-primary-500 rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                              />
+                            ) : (
+                              <div className="h-full w-1/3 bg-primary-500/70 rounded-full animate-pulse" />
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <div
+                      className={`text-sm ${liveProgress.success ? 'text-green-400' : 'text-red-400'}`}
+                    >
+                      {liveProgress.success ? '✓' : '✗'} {liveProgress.message} —{' '}
+                      {new Date(liveProgress.finishedAt).toLocaleString('en-AU', {
+                        day: 'numeric',
+                        month: 'short',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Sync Result */}
               {syncResult && (

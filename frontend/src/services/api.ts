@@ -400,6 +400,7 @@ export const settingsApi = {
 // Sync API (Admin only)
 export const syncApi = {
   getStatus: () => api.get('/sync/status'),
+  getProgress: () => api.get('/sync/progress'),
   testConnection: () => api.get('/sync/test-connection'),
   syncCategories: () => api.post('/sync/categories'),
   syncProducts: () => api.post('/sync/products'),
