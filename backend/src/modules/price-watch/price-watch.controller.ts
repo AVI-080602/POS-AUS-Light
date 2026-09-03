@@ -27,6 +27,7 @@ export class PriceWatchController {
   async products(
     @Query('search') search?: string,
     @Query('supplier') supplier?: string,
+    @Query('category') category?: string,
     @Query('competitor') competitor?: string,
     @Query('verdict') verdict?: string,
     @Query('moversOnly') moversOnly?: string,
@@ -36,6 +37,7 @@ export class PriceWatchController {
     const data = await this.priceWatchService.getRows({
       search,
       supplier,
+      category,
       competitor,
       verdict,
       moversOnly: moversOnly === 'true',
@@ -51,6 +53,7 @@ export class PriceWatchController {
     @Res() res: Response,
     @Query('search') search?: string,
     @Query('supplier') supplier?: string,
+    @Query('category') category?: string,
     @Query('competitor') competitor?: string,
     @Query('verdict') verdict?: string,
     @Query('moversOnly') moversOnly?: string,
@@ -58,6 +61,7 @@ export class PriceWatchController {
     const csv = await this.priceWatchService.exportCsv({
       search,
       supplier,
+      category,
       competitor,
       verdict,
       moversOnly: moversOnly === 'true',

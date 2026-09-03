@@ -424,6 +424,7 @@ export const competitorApi = {
 export interface PriceWatchFilters {
   search?: string;
   supplier?: string;
+  category?: string;
   competitor?: string;
   verdict?: string;
   moversOnly?: boolean;

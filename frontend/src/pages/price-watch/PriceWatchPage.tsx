@@ -24,6 +24,7 @@ interface Summary {
   cards: Record<string, number>;
   totalSkus: number;
   suppliers: string[];
+  categories: string[];
   competitors: string[];
   lastRun: { id: number; finishedAt: string; stats: any } | null;
   prevRun: { id: number; finishedAt: string } | null;
@@ -67,6 +68,7 @@ export default function PriceWatchPage() {
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [supplier, setSupplier] = useState('');
+  const [category, setCategory] = useState('');
   const [competitor, setCompetitor] = useState('');
   const [verdict, setVerdict] = useState('');
   const [moversOnly, setMoversOnly] = useState(false);
@@ -74,6 +76,7 @@ export default function PriceWatchPage() {
   const filters: PriceWatchFilters = {
     search: search || undefined,
     supplier: supplier || undefined,
+    category: category || undefined,
     competitor: competitor || undefined,
     verdict: verdict || undefined,
     moversOnly: moversOnly || undefined,
@@ -100,7 +103,7 @@ export default function PriceWatchPage() {
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, supplier, competitor, verdict, moversOnly, page]);
+  }, [search, supplier, category, competitor, verdict, moversOnly, page]);
 
   useEffect(loadRows, [loadRows]);
 
@@ -223,6 +226,21 @@ export default function PriceWatchPage() {
           {(summary?.suppliers ?? []).map((s) => (
             <option key={s} value={s}>
               {s}
+            </option>
+          ))}
+        </select>
+        <select
+          value={category}
+          onChange={(e) => {
+            setCategory(e.target.value);
+            setPage(1);
+          }}
+          className="border border-gray-700 bg-pos-card rounded-md px-3 py-2 text-sm max-w-[220px]"
+        >
+          <option value="">All categories</option>
+          {(summary?.categories ?? []).map((c) => (
+            <option key={c} value={c}>
+              {c}
             </option>
           ))}
         </select>

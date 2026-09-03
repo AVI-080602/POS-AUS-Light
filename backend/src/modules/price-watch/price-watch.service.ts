@@ -38,6 +38,8 @@ export interface DashboardRow {
   supplier: string;
   sku: string;
   name: string | null;
+  // POS product's Magento category names (empty when not in POS).
+  categories: string[];
   costIncGst: number;
   posPrice: number | null;
   competitors: Partial<
@@ -253,6 +255,21 @@ export class PriceWatchService {
       .createQueryBuilder('p')
       .select(['p.sku', 'p.name', 'p.price', 'p.specialPrice', 'p.specialPriceFrom', 'p.specialPriceTo'])
       .getMany();
+
+    // sku -> Magento category names, for the category filter dropdown.
+    const catBySku = new Map<string, string[]>();
+    const catRows: Array<{ sku: string; cname: string }> = await this.productRepo
+      .createQueryBuilder('p')
+      .innerJoin('p.categories', 'c')
+      .select('p.sku', 'sku')
+      .addSelect('c.name', 'cname')
+      .getRawMany();
+    for (const r of catRows) {
+      if (!r.cname) continue;
+      const k = norm(r.sku);
+      if (!catBySku.has(k)) catBySku.set(k, []);
+      catBySku.get(k)!.push(r.cname);
+    }
     const posBySku = new Map<string, { name: string; price: number }>();
     const now = new Date();
     for (const p of products) {
@@ -294,6 +311,7 @@ export class PriceWatchService {
         supplier: c.supplier,
         sku: c.sku,
         name: pos?.name ?? null,
+        categories: pos ? (catBySku.get(k) ?? []) : [],
         costIncGst: Number(c.costIncGst),
         posPrice: pos?.price ?? null,
         competitors,
@@ -325,10 +343,13 @@ export class PriceWatchService {
     const cards = { cheaper: 0, costlier: 0, same: 0, no_competitor: 0, not_in_pos: 0 };
     for (const r of bySku.values()) cards[r.verdict]++;
     const suppliers = [...new Set(model.rows.map((r) => r.supplier))].sort();
+    const categorySet = new Set<string>();
+    for (const r of model.rows) for (const cat of r.categories) categorySet.add(cat);
     return {
       cards,
       totalSkus: bySku.size,
       suppliers,
+      categories: [...categorySet].sort((a, b) => a.localeCompare(b)),
       competitors: COMPETITORS,
       lastRun: model.lastRun,
       prevRun: model.prevRun,
@@ -339,6 +360,7 @@ export class PriceWatchService {
   async getRows(q: {
     search?: string;
     supplier?: string;
+    category?: string;
     competitor?: string;
     verdict?: string;
     moversOnly?: boolean;
@@ -348,6 +370,7 @@ export class PriceWatchService {
     const model = await this.getModel();
     let rows = model.rows;
     if (q.supplier) rows = rows.filter((r) => r.supplier === q.supplier);
+    if (q.category) rows = rows.filter((r) => r.categories.includes(q.category!));
     if (q.verdict) rows = rows.filter((r) => r.verdict === q.verdict);
     if (q.competitor) rows = rows.filter((r) => (r.competitors as any)[q.competitor!]);
     if (q.moversOnly) rows = rows.filter((r) => r.maxMove > 0);
@@ -365,6 +388,7 @@ export class PriceWatchService {
   async exportCsv(q: {
     search?: string;
     supplier?: string;
+    category?: string;
     competitor?: string;
     verdict?: string;
     moversOnly?: boolean;
@@ -378,6 +402,7 @@ export class PriceWatchService {
       'supplier',
       'sku',
       'name',
+      'categories',
       'cost_inc_gst',
       'pos_price',
       'verdict',
@@ -390,6 +415,7 @@ export class PriceWatchService {
           esc(r.supplier),
           esc(r.sku),
           esc(r.name),
+          esc(r.categories.join('; ')),
           r.costIncGst,
           r.posPrice ?? '',
           r.verdict,
