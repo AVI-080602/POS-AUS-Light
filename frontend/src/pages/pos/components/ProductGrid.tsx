@@ -29,6 +29,8 @@ interface ProductGridProps {
   onSelect: (product: Product) => void;
   // productId -> trade auto-discount (for the yellow trade tag)
   tradeMap?: Record<number, TradeInfo>;
+  // productId -> store promotion at checkout (Black Friday, Nov 2026)
+  promoMap?: Record<number, { percent: number; label: string | null; name?: string | null }>;
   // Override the red "SALE" badge text — e.g. "CLEARANCE" when viewing
   // the Warehouse Clearance category. Defaults to "SALE".
   saleBadgeLabel?: string;
@@ -39,6 +41,7 @@ export default function ProductGrid({
   isLoading,
   onSelect,
   tradeMap = {},
+  promoMap = {},
   saleBadgeLabel = 'SALE',
 }: ProductGridProps) {
   if (isLoading) {
@@ -78,6 +81,14 @@ export default function ProductGrid({
           if (tradePrice != null && effectiveProductPrice(product) <= tradePrice) {
             tradePrice = null;
           }
+          // Store promotion price, taken off the price on the tile at
+          // checkout for every customer (Sally, 1 Nov 2026: Black Friday
+          // "applied directly to products").
+          const promo = promoMap[product.id];
+          const promoPrice =
+            promo && promo.percent > 0
+              ? Math.round(effectiveProductPrice(product) * (1 - promo.percent / 100) * 100) / 100
+              : null;
           return (
           <button
             key={product.id}
@@ -163,6 +174,14 @@ export default function ProductGrid({
                 ) : (
                   <span className="text-primary-400 font-bold">
                     ${product.price.toFixed(2)}
+                  </span>
+                )}
+                {promoPrice !== null && (
+                  <span
+                    className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white"
+                    title={promo?.label || 'Promotion at checkout'}
+                  >
+                    {promo?.name || 'Promo'} ${promoPrice.toFixed(2)}
                   </span>
                 )}
                 {tradePrice !== null && (

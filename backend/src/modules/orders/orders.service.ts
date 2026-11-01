@@ -227,6 +227,7 @@ export class OrdersService {
             // Custom items have no catalogue cost — nothing to enforce
             // the cost+30% floor against.
             cost: null as number | null,
+            promoName: null as string | null,
           };
         }
         const product = products.find((p) => p.id === item.productId);
@@ -248,7 +249,7 @@ export class OrdersService {
         const promo =
           !dto.trustItemUnitPrices && !item.priceEdited
             ? await this.tradeDiscounts.getPromoDiscount(product)
-            : { percent: 0, label: null };
+            : { percent: 0, label: null, name: null };
 
         // Base price selection:
         //   - Retail customers on a SALE item: use special price.
@@ -307,6 +308,12 @@ export class OrdersService {
           ? 0
           : Math.max(tradeWins ? autoDiscount : 0, promo.percent);
         const effectiveDiscount = Math.max(manualDiscount, appliedAutoDiscount);
+        // The promotion gave this line its discount (it wins or ties), so
+        // the invoice names it (Sally, 1 Nov 2026: Black Friday).
+        const promoName =
+          !item.priceEdited && promo.percent > 0 && promo.percent >= effectiveDiscount - 1e-9
+            ? promo.name
+            : null;
         return {
           productId: item.productId,
           sku: product.sku,
@@ -321,6 +328,7 @@ export class OrdersService {
           // Clearance items are excluded from the cart-level discount.
           isSaleItem: product.isOnSale,
           cost: product.cost != null ? Number(product.cost) : null,
+          promoName,
           // Set trade price for this product, when selling to trade —
           // exempts the line from the margin floor at that price.
           approvedPrice:
@@ -793,6 +801,8 @@ export class OrdersService {
             taxAmount: lineTaxAmount,
             rowTotal,
             costPrice: product?.cost || null,
+            promoLabel:
+              cartItems.find((c) => c.productId === calcItem.productId && calcItem.productId > 0)?.promoName ?? null,
             isBackorder: flagBackorder,
             isLaybyHeld: flagHeld && !flagBackorder,
             supplier: supplierByProductId.get(calcItem.productId) ?? null,

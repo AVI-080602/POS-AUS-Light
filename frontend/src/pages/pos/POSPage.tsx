@@ -1028,6 +1028,7 @@ export default function POSPage() {
               isLoading={isLoading}
               onSelect={(p) => setDetailProduct(p)}
               tradeMap={tradeMap}
+              promoMap={promoMap}
               saleBadgeLabel={
                 /clearance/i.test(activeCategoryName)
                   ? 'WAREHOUSE CLEARANCE'

@@ -17,6 +17,7 @@ import {
   setTradeAutoDiscounts,
   setCustomer,
   setDelivery,
+  lineDiscountSource,
 } from '../../../store/slices/cartSlice';
 import InvoiceModal from './InvoiceModal';
 import AddressAutocomplete from '../../../components/AddressAutocomplete';
@@ -1014,7 +1015,10 @@ export default function PaymentModal({
               Math.max(0, laybyHeldQtyByProductId[item.productId] ?? item.quantity),
             )
           : 0;
-        return { ...item, isBackorder: isBack, isLaybyHeld: isHeld, backorderQty, laybyHeldQty };
+        // The promotion's name prints only when it gave the line its
+        // discount — not when trade or the cashier's % beat it.
+        const promoName = lineDiscountSource(item) === 'promo' ? item.promoName || null : null;
+        return { ...item, isBackorder: isBack, isLaybyHeld: isHeld, backorderQty, laybyHeldQty, promoName };
       });
       const invoice = {
         orderNumber,

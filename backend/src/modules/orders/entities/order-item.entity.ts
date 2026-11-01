@@ -71,6 +71,12 @@ export class OrderItem {
   })
   costPrice: number | null;
 
+  // The store-wide promotion that gave this line its discount ("Black
+  // Friday"), so the invoice can say so (Sally, 1 Nov 2026). Null = the
+  // discount, if any, was trade or the cashier's.
+  @Column({ name: 'promo_label', type: 'varchar', length: 120, nullable: true })
+  promoLabel: string | null;
+
   // Backorder tracking. `isBackorder` is true when stock wasn't available
   // at time of sale and the customer agreed to wait. `backorderFulfilledAt`
   // is set when a manager marks the item as received.

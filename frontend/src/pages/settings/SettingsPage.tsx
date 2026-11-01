@@ -223,7 +223,7 @@ export default function SettingsPage() {
   const [minMarginInput, setMinMarginInput] = useState('20');
   const [minMarginSaving, setMinMarginSaving] = useState(false);
   const [minMarginMsg, setMinMarginMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  // Checkout promotion (fans 10%, Oct 2026).
+  // Checkout promotion (fans 10% in Oct 2026, Black Friday from 1 Nov).
   const [promo, setPromo] = useState<{
     enabled: boolean;
     label: string;
@@ -231,6 +231,7 @@ export default function SettingsPage() {
     includeCategories: string[];
     excludeCategories: string[];
     excludePrefixes: string[];
+    excludeOnSale: boolean;
     endsOn: string | null;
     showBanner: boolean;
     bannerText: string;
@@ -1082,7 +1083,7 @@ export default function SettingsPage() {
               {promo && (
                 <div className="card p-6">
                   <div className="flex items-center justify-between gap-4 mb-1">
-                    <h2 className="text-lg font-semibold">Fan Promotion</h2>
+                    <h2 className="text-lg font-semibold">Promotion: {promo.label}</h2>
                     <label className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
@@ -1096,11 +1097,22 @@ export default function SettingsPage() {
                   <p className="text-sm text-gray-400 mb-4">
                     Comes off automatically at checkout for every customer, on{' '}
                     {promo.includeCategories.join(', ')} (not{' '}
-                    {promo.excludeCategories.join(', ') || 'nothing'}). Items on sale or in a
-                    Sale / Clearance category never get it, and nothing goes below the
-                    minimum margin. Trade customers get whichever is better: their trade
-                    price or this.
+                    {promo.excludeCategories.join(', ') || 'nothing'}).{' '}
+                    {promo.excludeOnSale
+                      ? 'Items on sale or in a Sale / Clearance category never get it.'
+                      : 'Items with a special price get it off that price, as on the website.'}{' '}
+                    Nothing goes below the minimum margin. Trade customers get whichever is
+                    better: their trade price or this.
                   </p>
+                  <label className="flex items-center gap-2 text-sm mb-4">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4"
+                      checked={promo.excludeOnSale}
+                      onChange={(e) => setPromo({ ...promo, excludeOnSale: e.target.checked })}
+                    />
+                    Leave out anything already on sale (special price)
+                  </label>
                   <div className="flex items-end gap-4 flex-wrap">
                     <div>
                       <label className="block text-sm font-medium mb-1">Discount</label>
@@ -1173,7 +1185,7 @@ export default function SettingsPage() {
                   {promoSummary && (
                     <p className="text-sm text-gray-400 mt-3">
                       Right now: <span className="font-semibold text-pos-text">{promoSummary.eligible + (promoSummary.limitedByMargin || 0)}</span>{' '}
-                      fans get it
+                      products get it
                       {promoSummary.limitedByMargin ? ` (${promoSummary.limitedByMargin} limited by the minimum margin)` : ''}.
                       Excluded: {promoSummary.excludedSale} on sale / clearance, {promoSummary.excludedBrand} by
                       name, {promoSummary.excludedMargin} already at the minimum margin.

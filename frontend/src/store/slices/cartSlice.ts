@@ -22,6 +22,8 @@ export interface CartItem {
   // or a cart loaded from a quote (the server does the same).
   promoPercent?: number;
   promoLabel?: string | null;
+  // The promotion's own name ("Black Friday") for the invoice.
+  promoName?: string | null;
   discountAmount: number;
   taxAmount: number;
   rowTotal: number;
@@ -414,7 +416,7 @@ const cartSlice = createSlice({
     // the map lose any promo. Quote carts keep their quoted prices.
     setPromoDiscounts: (
       state,
-      action: PayloadAction<Record<number, { percent: number; label: string | null }>>,
+      action: PayloadAction<Record<number, { percent: number; label: string | null; name?: string | null }>>,
     ) => {
       const map = action.payload || {};
       let changed = false;
@@ -422,6 +424,7 @@ const cartSlice = createSlice({
         const hit = state.fromQuoteId ? null : map[it.productId];
         const pct = hit ? hit.percent : 0;
         const label = hit ? hit.label : null;
+        it.promoName = hit ? hit.name || null : null;
         if ((it.promoPercent || 0) !== pct || (it.promoLabel || null) !== label) {
           it.promoPercent = pct;
           it.promoLabel = label;

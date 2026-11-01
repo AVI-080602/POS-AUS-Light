@@ -166,14 +166,18 @@ export class TradeDiscountsService {
     // SALE tag staff see on the product (special price active, or in a
     // Sale / Clearance category; Eglo and Havit only when in clearance —
     // their special price is their everyday price, Sally 17 Oct 2026).
-    if (product.countsAsSale) {
+    // Black Friday leaves this to its category list instead (see
+    // excludeOnSale).
+    if (promo.excludeOnSale && product.countsAsSale) {
       return { percent: 0, label: null, reason: 'sale' };
     }
     const label = `${promo.label} ${promo.percent}% off`;
+    // The % comes off what the customer would otherwise pay — the special
+    // price when one is running — so the margin floor is checked there.
     const floored = await this.applyMarginFloor(product, {
       percent: promo.percent,
       label,
-      baseOnSpecialPrice: false,
+      baseOnSpecialPrice: true,
     });
     if (floored.percent <= 0) return { percent: 0, label: null, reason: 'margin' };
     if (floored.percent < promo.percent - 1e-9) {
@@ -182,9 +186,13 @@ export class TradeDiscountsService {
     return { percent: floored.percent, label, reason: 'eligible' };
   }
 
-  async getPromoDiscount(product: Product): Promise<{ percent: number; label: string | null }> {
+  // `name` is the promotion's own name ("Black Friday") for the invoice.
+  async getPromoDiscount(
+    product: Product,
+  ): Promise<{ percent: number; label: string | null; name: string | null }> {
     const r = await this.evaluatePromo(product);
-    return { percent: r.percent, label: r.label };
+    const name = r.percent > 0 ? (await this.getPromotion()).label : null;
+    return { percent: r.percent, label: r.label, name };
   }
 
   // For the Settings card: how the current rules play out across the range.

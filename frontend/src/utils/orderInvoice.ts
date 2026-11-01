@@ -53,6 +53,8 @@ export function buildInvoiceData(o: any, fallbackCustomer?: any, refunds?: any[]
       unitPrice: parseFloat(it.unitPrice),
       discountPercent: parseFloat(it.discountPercent || 0),
       discountAmount: parseFloat(it.discountAmount || 0),
+      // "Black Friday" when the promotion gave this line its discount.
+      promoName: it.promoLabel || null,
       taxAmount: parseFloat(it.taxAmount || 0),
       rowTotal: parseFloat(it.rowTotal ?? it.unitPrice * it.quantity),
       isBackorder: openBackorder,

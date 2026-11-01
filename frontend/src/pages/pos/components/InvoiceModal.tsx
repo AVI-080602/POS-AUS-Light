@@ -273,9 +273,20 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
     // Flag clearance/sale lines so the printed invoice shows why the
     // price differs from the ticketed RRP.
     isSale: !!it.isSaleItem,
+    // The store promotion that gave this line its discount, named on the
+    // line (Sally, 1 Nov 2026: "reflect on invoices the BF discount").
+    promo: it.promoName
+      ? `${it.promoName} ${+(Math.max(0, 1 - (it.quantity > 0 ? it.rowTotal / it.quantity : it.unitPrice) / (it.unitPrice || 1)) * 100).toFixed(1)}% off`
+      : null,
     refundedQty: it.refundedQty || 0,
     };
   });
+  // What the promotion saved on this invoice, by name.
+  const promoSavings = rows.reduce(
+    (s, r) => (r.promo ? s + Math.max(0, (r.listPrice - r.unitPrice) * r.qty) : s),
+    0,
+  );
+  const promoName = invoice.items.find((it) => it.promoName)?.promoName || null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -469,6 +480,23 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                         SALE
                       </span>
                     ) : null}
+                    {r.promo ? (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          padding: '1px 5px',
+                          border: `1px solid ${INK}`,
+                          borderRadius: 3,
+                          fontSize: '9px',
+                          fontWeight: 800,
+                          letterSpacing: '0.04em',
+                          verticalAlign: 'middle',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {r.promo}
+                      </span>
+                    ) : null}
                     {r.refundedQty > 0 ? (
                       <span
                         style={{
@@ -531,6 +559,12 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
               )}
             </tbody>
           </table>
+
+          {promoName && promoSavings > 0.005 && (
+            <div style={{ textAlign: 'right', marginTop: '10px', fontSize: '12px', fontWeight: 700 }}>
+              {promoName} savings on this invoice: {money(promoSavings)}
+            </div>
+          )}
 
           {/* Totals — right-aligned block */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '18px' }}>

@@ -1,6 +1,7 @@
-// Store-wide promotion applied automatically at checkout (Avi / Sally,
-// 7 Oct 2026: "for all fans apply 10% at checkout, excluding the ones
-// already on sale, clearance and Iconic"). Stored as JSON in the
+// Store-wide promotion applied automatically at checkout. First the fan
+// promotion (Avi / Sally, 7 Oct 2026: "for all fans apply 10% at
+// checkout, excluding the ones already on sale, clearance and Iconic"),
+// now Black Friday (Sally, 1 Nov 2026). Stored as JSON in the
 // `fan_promotion` setting and edited under Settings -> Trade Pricing.
 //
 // Unlike the trade rules it applies to EVERY customer. A trade customer
@@ -17,6 +18,11 @@ export interface Promotion {
   // these is excluded — how the Iconic Fan Company range is identified,
   // since its brand category in Magento has no products in it.
   excludePrefixes: string[];
+  // Leave out anything already on sale (special price, or a Sale /
+  // Clearance category). Off for Black Friday: Magento's rule takes its %
+  // off the special price too and leaves out only the Sale / Clearance
+  // categories, which excludeCategories names.
+  excludeOnSale: boolean;
   // Last day of the promotion (YYYY-MM-DD, store time), or null for
   // open-ended.
   endsOn: string | null;
@@ -28,17 +34,37 @@ export interface Promotion {
 
 export const PROMOTION_SETTING_KEY = 'fan_promotion';
 
+// Black Friday 2026, mirroring Magento cart rule 113 "Black Friday SALE
+// 2026": 15% at checkout on the whole range except Sale, Warehouse
+// Clearance, the fans sale category and the Eglo, Iconic, Trend, IXL and
+// Brightgreen brand categories. The Magento fans sale category is "SALE -
+// 40% Off Ceiling Fans"; the POS still has its old name, so both are
+// listed. Brand products missing from their brand category (64 Eglo, 12
+// IXL, 15 Iconic fans on 1 Nov) are caught by name.
 export const DEFAULT_PROMOTION: Promotion = {
   enabled: true,
-  label: 'Fan promotion',
-  percent: 10,
-  includeCategories: ['Fans', 'Smart Ceiling Fans', 'IKKÜ Ceiling Fans'],
-  excludeCategories: ['Fan Accesories'],
-  excludePrefixes: ['Iconic', 'Artemis', 'Sycamore'],
+  label: 'Black Friday',
+  percent: 15,
+  includeCategories: ['Indoor', 'Outdoor', 'LED', 'Globes', 'Fans', 'Exhausts Fans', 'Smart Home', 'Brands'],
+  excludeCategories: [
+    'Sale',
+    'Warehouse Clearance',
+    'SALE - 40% Off Ceiling Fans',
+    'SALE - Up to 40% of Fans',
+    'Eglo',
+    'Eglo Ceiling Fans - Major Supplier',
+    'Iconic',
+    'Trend',
+    'Trend Lighting',
+    'IXL Appliances',
+    'Brightgreen',
+  ],
+  excludePrefixes: ['Eglo', 'Iconic', 'Artemis', 'Sycamore', 'Trend', 'IXL'],
+  excludeOnSale: false,
   endsOn: null,
   showBanner: true,
   bannerText:
-    'FAN PROMOTION — {percent}% OFF ALL FANS AT CHECKOUT · Excludes fans already on sale, clearance and Iconic fans',
+    'BLACK FRIDAY SALE — {percent}% OFF AT CHECKOUT · Excludes Sale & Clearance items, Eglo, Iconic, Trend and IXL',
 };
 
 const list = (v: unknown, fallback: string[]): string[] => {
@@ -64,6 +90,8 @@ export function normalisePromotion(raw: unknown): Promotion {
     includeCategories: list(r.includeCategories, DEFAULT_PROMOTION.includeCategories),
     excludeCategories: list(r.excludeCategories, DEFAULT_PROMOTION.excludeCategories),
     excludePrefixes: list(r.excludePrefixes, DEFAULT_PROMOTION.excludePrefixes),
+    excludeOnSale:
+      r.excludeOnSale === undefined ? DEFAULT_PROMOTION.excludeOnSale : r.excludeOnSale === true,
     endsOn: ends,
     showBanner: r.showBanner === undefined ? DEFAULT_PROMOTION.showBanner : r.showBanner === true,
     bannerText:
