@@ -117,6 +117,30 @@ export class TradeDiscountsService {
     }).format(new Date());
   }
 
+  // Store time as "YYYY-MM-DD HH:mm", to compare with discountUntil.
+  private static storeNow(): string {
+    const p = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Australia/Melbourne',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date());
+    const g = (t: string) => p.find((x) => x.type === t)?.value || '00';
+    return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}`;
+  }
+
+  // Past discountUntil the banner keeps running but nothing comes off at
+  // checkout: the sale prices come from Magento instead (Black Friday at
+  // product level, Darshan 1 Nov 2026), and taking the % too would
+  // discount twice.
+  async isCheckoutDiscountOn(): Promise<boolean> {
+    const promo = await this.getPromotion();
+    return !(promo.discountUntil && TradeDiscountsService.storeNow() >= promo.discountUntil);
+  }
+
   // Why a product does / doesn't get the promotion. Needs the
   // categories relation loaded.
   async evaluatePromo(product: Product): Promise<{
@@ -129,6 +153,7 @@ export class TradeDiscountsService {
     if (promo.endsOn && TradeDiscountsService.storeToday() > promo.endsOn) {
       return { percent: 0, label: null, reason: 'off' };
     }
+    if (!(await this.isCheckoutDiscountOn())) return { percent: 0, label: null, reason: 'off' };
     // Category-based: if a caller loaded the product without its
     // categories, fetch them rather than silently finding nothing in scope.
     if (!product.categories) {

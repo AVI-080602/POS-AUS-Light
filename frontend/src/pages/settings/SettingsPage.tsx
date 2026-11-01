@@ -233,6 +233,7 @@ export default function SettingsPage() {
     excludePrefixes: string[];
     excludeOnSale: boolean;
     endsOn: string | null;
+    discountUntil: string | null;
     showBanner: boolean;
     bannerText: string;
   } | null>(null);
@@ -1148,6 +1149,20 @@ export default function SettingsPage() {
                         className="input w-44"
                         value={promo.endsOn || ''}
                         onChange={(e) => setPromo({ ...promo, endsOn: e.target.value || null })}
+                      />
+                    </div>
+                    <div>
+                      <label
+                        className="block text-sm font-medium mb-1"
+                        title="From then the banner stays but nothing comes off at checkout — the sale prices come from Magento"
+                      >
+                        Checkout discount stops at
+                      </label>
+                      <input
+                        type="datetime-local"
+                        className="input w-56"
+                        value={(promo.discountUntil || '').replace(' ', 'T')}
+                        onChange={(e) => setPromo({ ...promo, discountUntil: e.target.value || null })}
                       />
                     </div>
                     <button className="btn-primary" onClick={handleSavePromo} disabled={promoSaving}>

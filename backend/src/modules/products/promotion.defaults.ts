@@ -26,6 +26,10 @@ export interface Promotion {
   // Last day of the promotion (YYYY-MM-DD, store time), or null for
   // open-ended.
   endsOn: string | null;
+  // From this store time ("YYYY-MM-DD HH:mm") nothing comes off at
+  // checkout but the banner keeps running — for when the sale prices come
+  // from Magento as special prices. Null = the % applies throughout.
+  discountUntil: string | null;
   // Red strip across the top of the POS while the promotion runs.
   // {percent} in the text is replaced with the discount.
   showBanner: boolean;
@@ -62,9 +66,13 @@ export const DEFAULT_PROMOTION: Promotion = {
   excludePrefixes: ['Eglo', 'Iconic', 'Artemis', 'Sycamore', 'Trend', 'IXL'],
   excludeOnSale: false,
   endsOn: null,
+  // Darshan puts the Black Friday prices on the products in Magento
+  // tonight; the 00:30 product sync brings them across, so the POS stops
+  // taking its own % then (Avi, 1 Nov 2026).
+  discountUntil: '2026-11-02 00:30',
   showBanner: true,
   bannerText:
-    'BLACK FRIDAY SALE — {percent}% OFF AT CHECKOUT · Excludes Sale & Clearance items, Eglo, Iconic, Trend and IXL',
+    'BLACK FRIDAY SALE NOW ON — Black Friday prices are already on the products · Excludes Sale & Clearance items, Eglo, Iconic, Trend and IXL',
 };
 
 const list = (v: unknown, fallback: string[]): string[] => {
@@ -93,6 +101,12 @@ export function normalisePromotion(raw: unknown): Promotion {
     excludeOnSale:
       r.excludeOnSale === undefined ? DEFAULT_PROMOTION.excludeOnSale : r.excludeOnSale === true,
     endsOn: ends,
+    discountUntil:
+      r.discountUntil === undefined
+        ? DEFAULT_PROMOTION.discountUntil
+        : typeof r.discountUntil === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/.test(r.discountUntil.trim())
+          ? r.discountUntil.trim().replace('T', ' ')
+          : null,
     showBanner: r.showBanner === undefined ? DEFAULT_PROMOTION.showBanner : r.showBanner === true,
     bannerText:
       typeof r.bannerText === 'string' && r.bannerText.trim()
