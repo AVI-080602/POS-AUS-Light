@@ -75,8 +75,9 @@ export const productsApi = {
 
   // Trade auto-discount rules (manager/admin read, admin write).
   getTradeRules: () => api.get('/products/trade-rules'),
-  updateTradeRules: (rules: any[]) =>
-    api.put('/products/trade-rules', { rules }),
+  // pausedUntil: last day (YYYY-MM-DD) every trade % rule is off; '' = not paused.
+  updateTradeRules: (rules: any[], pausedUntil?: string) =>
+    api.put('/products/trade-rules', pausedUntil === undefined ? { rules } : { rules, pausedUntil }),
 
   // On-the-spot supplier cost correction (manager/admin). null clears it.
   updateCost: (id: number, cost: number | null) =>

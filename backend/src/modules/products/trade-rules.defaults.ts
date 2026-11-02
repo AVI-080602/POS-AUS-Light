@@ -48,6 +48,19 @@ export interface TradeRule {
   enabled: boolean;
 }
 
+// Every trade % rule can be paused up to and including a day (store
+// time) — Black Friday 2026: the sale prices end 7 Dec and trade
+// customers get no trade % on top until then (Avi, 3 Nov 2026). They come
+// back on by themselves the day after. The `trade_rules_paused_until`
+// setting overrides this default; empty = not paused. A trade price set
+// on a product itself still applies.
+export const TRADE_PAUSE_SETTING_KEY = 'trade_rules_paused_until';
+export const DEFAULT_TRADE_RULES_PAUSED_UNTIL: string | null = '2026-12-07';
+
+export function normalisePausedUntil(raw: unknown): string | null {
+  return typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim()) ? raw.trim() : null;
+}
+
 export const SMART_HOME_ROOT_CATEGORY_ID = 24; // pos.categories.id
 export const LED_ALU_PROFILE_CATEGORY_ID = 92; // pos.categories.id
 

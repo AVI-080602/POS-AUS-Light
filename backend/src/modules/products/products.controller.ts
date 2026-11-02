@@ -36,6 +36,8 @@ import { SettingType } from '../settings/entities/setting.entity';
 import {
   DEFAULT_TRADE_RULES,
   normaliseTradeRules,
+  TRADE_PAUSE_SETTING_KEY,
+  normalisePausedUntil,
 } from './trade-rules.defaults';
 
 // Whitelist of Magento custom_attributes to show as "specifications".
@@ -324,7 +326,8 @@ export class ProductsController {
   @ApiOperation({ summary: 'Get the trade auto-discount rules' })
   async getTradeRules() {
     const rules = await this.tradeDiscounts.getRules();
-    return { success: true, data: { rules, defaults: DEFAULT_TRADE_RULES } };
+    const pausedUntil = await this.tradeDiscounts.getRulesPausedUntil();
+    return { success: true, data: { rules, defaults: DEFAULT_TRADE_RULES, pausedUntil } };
   }
 
   @Put('trade-rules')
@@ -332,7 +335,7 @@ export class ProductsController {
   @Roles(RoleNames.ADMIN)
   @ApiOperation({ summary: 'Update the trade auto-discount rules' })
   async updateTradeRules(
-    @Body() dto: { rules?: unknown },
+    @Body() dto: { rules?: unknown; pausedUntil?: unknown },
     @CurrentUser() user: any,
   ) {
     const rules = normaliseTradeRules(dto?.rules);
@@ -343,6 +346,16 @@ export class ProductsController {
       'Trade customer auto-discount rules',
       user?.id,
     );
+    // Sent only by a Settings page that shows the pause; '' or null ends it.
+    if (dto && 'pausedUntil' in dto) {
+      await this.settingsService.set(
+        TRADE_PAUSE_SETTING_KEY,
+        normalisePausedUntil(dto.pausedUntil) ?? '',
+        SettingType.STRING,
+        'Trade rules paused up to and including this day',
+        user?.id,
+      );
+    }
     // Drop the cached copy so the next priced line uses the new rates
     // immediately rather than waiting out the TTL.
     this.tradeDiscounts.invalidateRulesCache();

@@ -8,6 +8,9 @@ import {
   TradeRule,
   DEFAULT_TRADE_RULES,
   normaliseTradeRules,
+  TRADE_PAUSE_SETTING_KEY,
+  DEFAULT_TRADE_RULES_PAUSED_UNTIL,
+  normalisePausedUntil,
 } from './trade-rules.defaults';
 import {
   Promotion,
@@ -281,6 +284,30 @@ export class TradeDiscountsService {
     return rules;
   }
 
+  private pauseCache: { until: string | null; loadedAt: number } | null = null;
+
+  // Last day the trade % rules are paused (YYYY-MM-DD), or null.
+  async getRulesPausedUntil(): Promise<string | null> {
+    const now = Date.now();
+    if (this.pauseCache && now - this.pauseCache.loadedAt < RULES_CACHE_TTL_MS) {
+      return this.pauseCache.until;
+    }
+    let until = DEFAULT_TRADE_RULES_PAUSED_UNTIL;
+    try {
+      const stored = await this.settingsService.getValue<unknown>(TRADE_PAUSE_SETTING_KEY, null);
+      if (stored != null) until = normalisePausedUntil(stored);
+    } catch {
+      // keep the default
+    }
+    this.pauseCache = { until, loadedAt: now };
+    return until;
+  }
+
+  async areRulesPaused(): Promise<boolean> {
+    const until = await this.getRulesPausedUntil();
+    return !!until && TradeDiscountsService.storeToday() <= until;
+  }
+
   private marginCache: { percent: number; loadedAt: number } | null = null;
 
   async getMinMarginPercent(): Promise<number> {
@@ -314,6 +341,7 @@ export class TradeDiscountsService {
   // them up immediately instead of waiting out the TTL.
   invalidateRulesCache(): void {
     this.rulesCache = null;
+    this.pauseCache = null;
     // Rules may target different category names now.
     this.nameSubtreeCache.clear();
   }
@@ -423,6 +451,7 @@ export class TradeDiscountsService {
         fixedPrice: fixed,
       };
     }
+    if (await this.areRulesPaused()) return NONE;
     const rules = await this.getRules();
     const productCategoryIds = new Set<number>(
       (product.categories || []).map((c) => c.id),

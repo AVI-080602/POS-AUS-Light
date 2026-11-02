@@ -218,6 +218,8 @@ export default function SettingsPage() {
   // what each rule applies to. Defaults kept alongside so an older
   // saved rule-set can be restored to the shipped configuration.
   const [tradeRules, setTradeRules] = useState<TradeRule[]>([]);
+  // Last day all trade rules are off ('' = not paused) — Black Friday 2026.
+  const [tradePausedUntil, setTradePausedUntil] = useState('');
   const [tradeRuleDefaults, setTradeRuleDefaults] = useState<TradeRule[]>([]);
   // Minimum margin over cost (Sally, 29 Sep 2026: 30% -> 20%).
   const [minMarginInput, setMinMarginInput] = useState('20');
@@ -320,6 +322,7 @@ export default function SettingsPage() {
         case 'trade':
           const tradeRes = await productsApi.getTradeRules();
           setTradeRules(tradeRes.data.data.rules || []);
+          setTradePausedUntil(tradeRes.data.data.pausedUntil || '');
           setTradeRuleDefaults(tradeRes.data.data.defaults || []);
           try {
             const cfg = await productsApi.getPricingConfig();
@@ -647,7 +650,7 @@ export default function SettingsPage() {
     setIsSaving(true);
     setSaveMessage('');
     try {
-      const res = await productsApi.updateTradeRules(tradeRules);
+      const res = await productsApi.updateTradeRules(tradeRules, tradePausedUntil);
       setTradeRules(res.data.data.rules || tradeRules);
       setSaveMessage('Trade pricing rules saved successfully!');
       setTimeout(() => setSaveMessage(''), 3000);
@@ -1259,6 +1262,30 @@ export default function SettingsPage() {
                   don't stack. A cashier's manual discount only wins if it's
                   larger. These mirror the Magento cart price rules.
                 </p>
+
+                <div
+                  className={`rounded-lg border p-3 mb-4 flex items-center gap-3 flex-wrap ${
+                    tradePausedUntil ? 'border-amber-500/60 bg-amber-500/10' : 'border-gray-600'
+                  }`}
+                >
+                  <label className="text-sm font-medium">All rules off up to and including</label>
+                  <input
+                    type="date"
+                    className="input w-44"
+                    value={tradePausedUntil}
+                    onChange={(e) => setTradePausedUntil(e.target.value)}
+                  />
+                  {tradePausedUntil && (
+                    <button className="btn-secondary text-xs py-1" onClick={() => setTradePausedUntil('')}>
+                      Clear
+                    </button>
+                  )}
+                  <span className="text-xs text-gray-400">
+                    {tradePausedUntil
+                      ? 'Trade customers get no trade % until then (a trade price set on a product still applies). They come back on by themselves the day after. Save below to change it.'
+                      : 'Not paused.'}
+                  </span>
+                </div>
 
                 <div className="space-y-4">
                   {tradeRules.map((r) => (
