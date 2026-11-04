@@ -281,7 +281,7 @@ export class OrdersController {
   @Patch(':id/items')
   @ApiOperation({
     summary:
-      "Replace the line items on an open order (backorder/layby/pending). Blocked once the order is complete/refunded/cancelled.",
+      "Replace the line items on an open order (backorder/layby/pending) or a completed POS sale (it then owes any difference). Blocked once refunded/cancelled.",
   })
   async updateItems(
     @Param('id', ParseIntPipe) id: number,

@@ -711,11 +711,12 @@ export default function OrdersPage() {
     );
   // Orders that can take a balance payment via the PAY flow: laybys and
   // backorders that took a deposit (Sally, 9 Sep: POS ORDER 0067 needs a
-  // PAY button so the customer can complete payment).
+  // PAY button so the customer can complete payment), and a finished sale
+  // that had lights added afterwards (Sally, 4 Nov 2026).
   const canTakePayment = (o: any) =>
     !isWebOrder(o) &&
     (['layby_active', 'layby_expired'].includes(o.status) ||
-      (['backorder_pending', 'pending', 'processing'].includes(o.status) &&
+      (['backorder_pending', 'pending', 'processing', 'complete'].includes(o.status) &&
         o.paymentStatus !== 'paid'));
 
   // Customer ticket for the box (Sally, 16 Oct 2026). Website orders keep

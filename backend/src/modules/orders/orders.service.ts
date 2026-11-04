@@ -1444,7 +1444,12 @@ export class OrdersService {
         relations: ['items'],
       });
       if (!order) throw new BadRequestException('Order not found');
-      if (!openStatuses.has(order.status)) {
+      // A finished POS sale can still take more lights (Sally, 4 Nov 2026:
+      // trade customers who walk out with stock and pay later). It stays
+      // COMPLETE and owes the difference, collected with PAY.
+      const completedPosSale =
+        order.status === OrderStatus.COMPLETE && order.source === OrderSource.POS;
+      if (!openStatuses.has(order.status) && !completedPosSale) {
         throw new BadRequestException(
           `Order is ${order.status} — item list is frozen. Only open orders can be edited.`,
         );
@@ -1925,12 +1930,15 @@ export class OrdersService {
     // laybys, backorder-pending, and plain pending/processing orders
     // that were part-paid. Closed orders (complete/refunded/cancelled)
     // still refuse.
+    // COMPLETE too: a finished sale that had lights added owes the
+    // difference (Sally, 4 Nov 2026). Nothing owed is refused below.
     const payableStatuses = new Set<OrderStatus>([
       OrderStatus.LAYBY_ACTIVE,
       OrderStatus.LAYBY_EXPIRED,
       OrderStatus.BACKORDER_PENDING,
       OrderStatus.PENDING,
       OrderStatus.PROCESSING,
+      OrderStatus.COMPLETE,
     ]);
     if (!isLaybyOrder && !payableStatuses.has(order.status)) {
       throw new BadRequestException(

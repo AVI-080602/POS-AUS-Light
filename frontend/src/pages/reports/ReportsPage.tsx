@@ -846,21 +846,24 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
   const [poFor, setPoFor] = useState<{ supplier: string; lines: BoLine[] } | null>(null);
 
   const q = query.trim().toLowerCase();
-  const matches = (l: BoLine) => {
+  // The supplier counts too (Sally, 4 Nov 2026: searching "Vencha" found
+  // only the POS line with Vencha in its name; the website lines under the
+  // Vencha heading don't say it).
+  const matches = (l: BoLine, supplierName: string) => {
     const t = new Date(l.orderedAt).getTime();
     if (fromMs != null && t < fromMs) return false;
     if (toMs != null && t > toMs) return false;
     if (poState === 'open' && l.poNumber) return false;
     if (poState === 'ordered' && !l.poNumber) return false;
     if (!q) return true;
-    return [l.poNumber, l.orderNumber, l.customer, l.company, l.sku, l.name, l.phone]
+    return [supplierName, l.poNumber, l.orderNumber, l.customer, l.company, l.sku, l.name, l.phone]
       .some((v) => String(v || '').toLowerCase().includes(q));
   };
 
   // Filters first, then regroup totals so cards / headers / PO match them.
   const dated: BoGroup[] = (data?.suppliers || [])
     .map((g) => {
-      const lines = g.lines.filter(matches);
+      const lines = g.lines.filter((l) => matches(l, g.supplier));
       return {
         ...g,
         lines,
@@ -1134,7 +1137,7 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
               <input
                 className="input w-72"
                 value={query}
-                placeholder="PO number, order, customer, SKU…"
+                placeholder="Supplier, PO number, order, customer, SKU…"
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>

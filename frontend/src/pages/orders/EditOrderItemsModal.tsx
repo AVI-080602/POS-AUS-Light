@@ -85,6 +85,48 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
     };
   }, [showAddSearch, search]);
 
+  // Custom light — not in the catalogue (Sally, 4 Nov 2026: a trade
+  // customer adding a custom light to an order they took stock on).
+  const [showCustom, setShowCustom] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customSku, setCustomSku] = useState('');
+  const [customPrice, setCustomPrice] = useState('');
+  const [customQty, setCustomQty] = useState('1');
+
+  const addCustom = () => {
+    const name = customName.trim();
+    const price = parseFloat(customPrice);
+    const qty = Math.max(1, parseInt(customQty) || 1);
+    if (!name) {
+      toast.error('Enter a description for the custom item');
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      toast.error('Enter the price (inc GST)');
+      return;
+    }
+    setRows((prev) => [
+      ...prev,
+      {
+        // Negative id = custom line (the server keeps no product for it).
+        productId: -Date.now(),
+        sku: customSku.trim() || 'CUSTOM',
+        name,
+        quantity: qty,
+        unitPrice: Math.round(price * 100) / 100,
+        discountPercent: 0,
+        isBackorder: false,
+        isLaybyHeld: false,
+        isCustom: true,
+      },
+    ]);
+    setCustomName('');
+    setCustomSku('');
+    setCustomPrice('');
+    setCustomQty('1');
+    setShowCustom(false);
+  };
+
   const updateRow = (i: number, patch: Partial<Row>) =>
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
@@ -290,13 +332,68 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
 
             {/* Add product panel */}
             <div className="mt-4 pt-4 border-t border-gray-800">
-              {!showAddSearch ? (
-                <button
-                  onClick={() => setShowAddSearch(true)}
-                  className="btn bg-primary-600 text-white flex items-center gap-2"
-                >
-                  <PlusIcon className="h-5 w-5" /> Add product
-                </button>
+              {showCustom ? (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-12 gap-2">
+                    <input
+                      autoFocus
+                      className="col-span-5 bg-pos-bg border border-gray-700 rounded-lg px-3 py-2 text-sm text-pos-text"
+                      placeholder="Description, e.g. Custom brass pendant"
+                      value={customName}
+                      onChange={(e) => setCustomName(e.target.value)}
+                    />
+                    <input
+                      className="col-span-3 bg-pos-bg border border-gray-700 rounded-lg px-3 py-2 text-sm text-pos-text"
+                      placeholder="SKU (optional)"
+                      value={customSku}
+                      onChange={(e) => setCustomSku(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      className="col-span-2 bg-pos-bg border border-gray-700 rounded-lg px-3 py-2 text-sm text-pos-text text-right"
+                      placeholder="Price inc GST"
+                      value={customPrice}
+                      onChange={(e) => setCustomPrice(e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      className="col-span-2 bg-pos-bg border border-gray-700 rounded-lg px-3 py-2 text-sm text-pos-text text-center"
+                      placeholder="Qty"
+                      value={customQty}
+                      onChange={(e) => setCustomQty(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button onClick={addCustom} className="btn bg-primary-600 text-white flex items-center gap-2">
+                      <PlusIcon className="h-5 w-5" /> Add to order
+                    </button>
+                    <button
+                      onClick={() => setShowCustom(false)}
+                      className="text-xs text-gray-500 hover:text-pos-text"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : !showAddSearch ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAddSearch(true)}
+                    className="btn bg-primary-600 text-white flex items-center gap-2"
+                  >
+                    <PlusIcon className="h-5 w-5" /> Add product
+                  </button>
+                  <button
+                    onClick={() => setShowCustom(true)}
+                    className="btn bg-purple-600 text-white flex items-center gap-2"
+                    title="A light that isn't in the catalogue — type its description and price"
+                  >
+                    <PlusIcon className="h-5 w-5" /> Add custom item
+                  </button>
+                </div>
               ) : (
                 <div>
                   <div className="relative">
