@@ -11,6 +11,7 @@ import {
   TRADE_PAUSE_SETTING_KEY,
   DEFAULT_TRADE_RULES_PAUSED_UNTIL,
   normalisePausedUntil,
+  PAUSED_TRADE_LIGHTING,
 } from './trade-rules.defaults';
 import {
   Promotion,
@@ -451,15 +452,83 @@ export class TradeDiscountsService {
         fixedPrice: fixed,
       };
     }
-    if (await this.areRulesPaused()) return NONE;
+    const rule = await this.findRule(product);
+    if (!rule) return NONE;
+    if (await this.areRulesPaused()) return this.pausedLightingDiscount(product, rule);
+
+    // SALE / CLEARANCE carve-out: the item matched this rule but is
+    // marked down already — no trade discount, and no falling through
+    // to a broader (bigger) rule either.
+    if (rule.excludeClearance && this.isClearanceProduct(product)) {
+      return NONE;
+    }
+
+    return this.applyMarginFloor(product, {
+      percent: rule.percent,
+      label: rule.label,
+      baseOnSpecialPrice: rule.baseOnSpecialPrice === true,
+    });
+  }
+
+  // Black Friday 2026: while the rules are paused, trade lighting still
+  // comes to exactly the lighting rule's % — off the regular price on a
+  // Black Friday price, as usual otherwise. See PAUSED_TRADE_LIGHTING.
+  private async pausedLightingDiscount(
+    product: Product,
+    rule: TradeRule,
+  ): Promise<{ percent: number; label: string | null; baseOnSpecialPrice: boolean }> {
+    const NONE = { percent: 0, label: null, baseOnSpecialPrice: false };
+    const cfg = PAUSED_TRADE_LIGHTING;
+    if (rule.id !== cfg.ruleId) return NONE;
+    const brand = new RegExp(`^(${cfg.excludeBrands.join('|')})\\b`, 'i');
+    if (
+      brand.test((product.name || '').trim()) ||
+      (product.categories || []).some((c) => brand.test((c.name || '').trim()))
+    ) {
+      return NONE;
+    }
+    const onSalePrice =
+      product.isOnSale &&
+      TradeDiscountsService.ymd(product.specialPriceTo) === cfg.saleSpecialPriceTo;
+    // Sale / Clearance as staff see it (SALE tag), with the Black Friday
+    // price itself not counting. Eglo / Havit: clearance only.
+    const onOtherSale = product.isEverydayPriceBrand
+      ? product.isInClearanceCategory
+      : product.isInSaleCategory || (product.isOnSale && !onSalePrice);
+    if (onOtherSale) return NONE;
+    return this.applyMarginFloor(
+      product,
+      onSalePrice
+        ? {
+            percent: rule.percent,
+            label: `Trade ${rule.percent}% off RRP (Black Friday)`,
+            baseOnSpecialPrice: false,
+          }
+        : {
+            percent: rule.percent,
+            label: rule.label,
+            baseOnSpecialPrice: rule.baseOnSpecialPrice === true,
+          },
+    );
+  }
+
+  // A date column as YYYY-MM-DD (TypeORM hands `date` back as a string,
+  // the sync writes Date objects).
+  private static ymd(v: Date | string | null | undefined): string | null {
+    if (!v) return null;
+    if (v instanceof Date) return Number.isFinite(v.getTime()) ? v.toISOString().slice(0, 10) : null;
+    return String(v).slice(0, 10);
+  }
+
+  // First enabled match WINS and terminates — mirrors Magento's
+  // stop_rules_processing. Rule order is part of the configuration.
+  private async findRule(product: Product): Promise<TradeRule | null> {
     const rules = await this.getRules();
     const productCategoryIds = new Set<number>(
       (product.categories || []).map((c) => c.id),
     );
     const name = (product.name || '').trim().toLowerCase();
 
-    // First enabled match WINS and terminates — mirrors Magento's
-    // stop_rules_processing. Rule order is part of the configuration.
     for (const rule of rules) {
       if (!rule.enabled) continue;
 
@@ -502,21 +571,9 @@ export class TradeDiscountsService {
         // continue.
         continue;
       }
-
-      // SALE / CLEARANCE carve-out: the item matched this rule but is
-      // marked down already — no trade discount, and no falling through
-      // to a broader (bigger) rule either.
-      if (rule.excludeClearance && this.isClearanceProduct(product)) {
-        return NONE;
-      }
-
-      return this.applyMarginFloor(product, {
-        percent: rule.percent,
-        label: rule.label,
-        baseOnSpecialPrice: rule.baseOnSpecialPrice === true,
-      });
+      return rule;
     }
-    return NONE;
+    return null;
   }
 
   // The trade rate never takes a product under the minimum margin

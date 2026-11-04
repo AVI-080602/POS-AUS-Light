@@ -53,13 +53,30 @@ export interface TradeRule {
 // customers get no trade % on top until then (Avi, 3 Nov 2026). They come
 // back on by themselves the day after. The `trade_rules_paused_until`
 // setting overrides this default; empty = not paused. A trade price set
-// on a product itself still applies.
+// on a product itself still applies, and so does PAUSED_TRADE_LIGHTING.
 export const TRADE_PAUSE_SETTING_KEY = 'trade_rules_paused_until';
 export const DEFAULT_TRADE_RULES_PAUSED_UNTIL: string | null = '2026-12-07';
 
 export function normalisePausedUntil(raw: unknown): string | null {
   return typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim()) ? raw.trim() : null;
 }
+
+// While the rules are paused, trade lighting still comes to exactly the
+// lighting rule's 20% (Sally, 5 Nov 2026: trade lost 5% on lighting over
+// Black Friday, "apply 5% more on top until Black Friday ends"; Avi:
+// exactly 20). On a Black Friday price that is 20% off the regular price,
+// so the sale's 15% counts towards it instead of stacking. Before the sale
+// those products sold at today's regular price, so trade pays what it did
+// in October. Lighting without a Black Friday price gets the rule as
+// usual. Fans get nothing extra: the sale's 15% is their trade 15%. IXL and
+// Sale / Clearance items get nothing.
+export const PAUSED_TRADE_LIGHTING = {
+  ruleId: 112,
+  // Darshan's Black Friday special prices all end on this day.
+  saleSpecialPriceTo: '2026-12-07',
+  // Name prefix, or a category named after the brand ("IXL Appliances").
+  excludeBrands: ['IXL'],
+};
 
 export const SMART_HOME_ROOT_CATEGORY_ID = 24; // pos.categories.id
 export const LED_ALU_PROFILE_CATEGORY_ID = 92; // pos.categories.id

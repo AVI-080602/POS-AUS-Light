@@ -1282,7 +1282,7 @@ export default function SettingsPage() {
                   )}
                   <span className="text-xs text-gray-400">
                     {tradePausedUntil
-                      ? 'Trade customers get no trade % until then (a trade price set on a product still applies). They come back on by themselves the day after. Save below to change it.'
+                      ? 'Trade customers get no trade % until then, except lighting: it still comes to the 20% rule, taken off the regular price on Black Friday items so the sale counts towards it (not IXL, Sale or Clearance). A trade price set on a product still applies. The rules come back on by themselves the day after. Save below to change it.'
                       : 'Not paused.'}
                   </span>
                 </div>
