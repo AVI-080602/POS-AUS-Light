@@ -11,8 +11,9 @@ import { CartItem } from '../../../store/slices/cartSlice';
 import { formatPhone } from '../../../utils/phone';
 
 // Company block printed at the top + footer of every invoice. Matches the
-// legal Australian Lighting & Fans (Sunridge) tax-invoice template.
-const COMPANY = {
+// legal Australian Lighting & Fans (Sunridge) tax-invoice template. Also
+// heads the store credit note (customers/StoreCreditNoteModal).
+export const COMPANY = {
   brandLight: 'AUSTRALIAN',
   brandAccent: 'LIGHTING',
   legalName: 'SUNRIDGE AUSTRALIA T/A AUSTRALIAN LIGHTING & FANS CLAYTON',

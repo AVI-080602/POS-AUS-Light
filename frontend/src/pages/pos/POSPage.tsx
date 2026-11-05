@@ -42,6 +42,7 @@ import PaymentModal from './components/PaymentModal';
 import ProductDetailModal from './components/ProductDetailModal';
 import OrderReviewModal, { OrderReviewSelections } from './components/OrderReviewModal';
 import StripCutModal from './components/StripCutModal';
+import BrandPicker from './components/BrandPicker';
 
 // View mode: categories → subcategories → products
 type ViewMode = 'categories' | 'subcategories' | 'products';
@@ -1312,16 +1313,11 @@ export default function POSPage() {
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Brand / Supplier *</label>
-                <select
-                  className="input"
+                <BrandPicker
+                  names={supplierNames}
                   value={customItemSupplier}
-                  onChange={(e) => setCustomItemSupplier(e.target.value)}
-                >
-                  <option value="">{supplierNames.length ? 'Pick the brand…' : 'Loading…'}</option>
-                  {supplierNames.map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
+                  onChange={setCustomItemSupplier}
+                />
               </div>
             </div>
             <button

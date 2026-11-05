@@ -20,6 +20,7 @@ import {
   MapPinIcon,
 } from '@heroicons/react/24/outline';
 import InvoiceModal from '../pos/components/InvoiceModal';
+import StoreCreditNoteModal, { StoreCreditNoteData } from './StoreCreditNoteModal';
 import { buildInvoiceData } from '../../utils/orderInvoice';
 import { formatPhone } from '../../utils/phone';
 
@@ -84,6 +85,8 @@ export default function CustomersPage() {
   const [cashOutAmount, setCashOutAmount] = useState('');
   const [cashOutNote, setCashOutNote] = useState('');
   const [isCashingOut, setIsCashingOut] = useState(false);
+  // Store credit note to print / email (Sally, 5 Nov 2026).
+  const [creditNote, setCreditNote] = useState<StoreCreditNoteData | null>(null);
   const { user: currentAuthUser } = useSelector((state: RootState) => state.auth);
   const [customerOrders, setCustomerOrders] = useState<any[]>([]);
   const [customerOrdersPagination, setCustomerOrdersPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
@@ -274,6 +277,27 @@ export default function CustomersPage() {
     } finally {
       setIsCashingOut(false);
     }
+  };
+
+  // A credit given to the customer (refund to credit or a positive
+  // adjustment) that hasn't expired can go out as a note.
+  const isLiveCredit = (tx: any) =>
+    Number(tx.amount) > 0 && !(tx.expiresAt && new Date(tx.expiresAt) <= new Date());
+  const latestCredit = storeCreditTxs.find(isLiveCredit);
+  const openCreditNote = (tx: any) => {
+    if (!selectedCustomer) return;
+    setCreditNote({
+      transactionId: tx.id,
+      type: tx.type,
+      amount: Number(tx.amount),
+      createdAt: tx.createdAt,
+      expiresAt: tx.expiresAt,
+      balance: storeCreditBalance,
+      customerName: [selectedCustomer.firstName, selectedCustomer.lastName].filter(Boolean).join(' '),
+      customerCompany: selectedCustomer.company,
+      customerEmail: selectedCustomer.email,
+      customerPhone: selectedCustomer.mobile || selectedCustomer.phone,
+    });
   };
 
   const resetDetailState = () => {
@@ -1211,6 +1235,18 @@ export default function CustomersPage() {
                         transactions table below. */}
                     <div className="flex gap-2">
                       <button
+                        className="btn-secondary text-sm flex items-center gap-2"
+                        disabled={!latestCredit}
+                        title={
+                          latestCredit
+                            ? `Print or email a store credit note for the $${Number(latestCredit.amount).toFixed(2)} credit of ${formatDate(latestCredit.createdAt)}. Older credits: printer icon on their row`
+                            : 'No unexpired store credit to send'
+                        }
+                        onClick={() => latestCredit && openCreditNote(latestCredit)}
+                      >
+                        <PrinterIcon className="h-4 w-4" /> Print / Email Credit
+                      </button>
+                      <button
                         className="btn-secondary text-sm"
                         disabled={storeCreditBalance <= 0}
                         title={
@@ -1250,6 +1286,7 @@ export default function CustomersPage() {
                           <th className="px-3 py-2 text-left">By</th>
                           <th className="px-3 py-2 text-right">Amount</th>
                           <th className="px-3 py-2 text-right">Balance After</th>
+                          <th className="px-3 py-2" />
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-700">
@@ -1290,6 +1327,17 @@ export default function CustomersPage() {
                             </td>
                             <td className="px-3 py-2 text-right font-medium">
                               ${Number(tx.balanceAfter).toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {isLiveCredit(tx) && (
+                                <button
+                                  className="text-gray-400 hover:text-pos-text"
+                                  title="Print or email a store credit note for this credit"
+                                  onClick={() => openCreditNote(tx)}
+                                >
+                                  <PrinterIcon className="h-4 w-4" />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -1494,6 +1542,9 @@ export default function CustomersPage() {
       {/* Invoice re-print (built from a fetched order) */}
       {invoiceData && (
         <InvoiceModal invoice={invoiceData} onClose={() => setInvoiceData(null)} />
+      )}
+      {creditNote && (
+        <StoreCreditNoteModal note={creditNote} onClose={() => setCreditNote(null)} />
       )}
 
       {/* Edit Customer Modal */}
