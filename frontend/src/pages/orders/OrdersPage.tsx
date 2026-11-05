@@ -1312,7 +1312,7 @@ export default function OrdersPage() {
                     <button
                       className="btn-secondary text-xs py-1"
                       onClick={() => setEditItemsOrder(selectedOrder)}
-                      title="Add/remove products, fix quantities or prices while the order is open"
+                      title="Add/remove products, fix quantities or prices, or change what's on back order / lay-by"
                     >
                       Edit Items
                     </button>

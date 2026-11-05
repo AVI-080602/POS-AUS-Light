@@ -297,6 +297,7 @@ export class OrdersController {
         isCustom?: boolean;
         sku?: string;
         name?: string;
+        fromItemId?: number;
       }>;
     },
     @CurrentUser() user: any,

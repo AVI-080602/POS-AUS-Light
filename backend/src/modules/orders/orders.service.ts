@@ -1427,6 +1427,9 @@ export class OrdersService {
       isCustom?: boolean;
       sku?: string;
       name?: string;
+      // The line these units came from. Edit Items sends it because units
+      // can move between taken, back order and lay-by.
+      fromItemId?: number;
     }>,
     userRole: UserRole,
   ): Promise<Order> {
@@ -1493,6 +1496,7 @@ export class OrdersService {
       let itemDiscounts = 0;
       const persistedItems: Partial<OrderItem>[] = [];
       const usedOld = new Set<number>();
+      const isOpenBackorder = (l: Partial<OrderItem>) => !!l.isBackorder && !l.backorderFulfilledAt;
       for (const item of items) {
         const qty = Math.max(1, Math.floor(Number(item.quantity) || 0));
         let sku = item.sku || 'CUSTOM';
@@ -1541,35 +1545,45 @@ export class OrdersService {
           keepSoldPrice = !typedBackorderPrice;
         }
 
-        // Same product (or same custom line) and same back-order flag on the
-        // order before the edit: keep its price, PO, received date, supplier
-        // and the cost it was sold at.
+        // The line this came from keeps its price, PO, supplier and the cost
+        // it was sold at: the one Edit Items names, else the same product in
+        // the same state, else any line of that product. Units moved to or
+        // from back order still sell at the price they were sold at (Sally,
+        // 5 Nov 2026).
         const isBack = !!item.isBackorder;
-        const prevIdx = oldItems.findIndex(
-          (o) =>
-            !usedOld.has(o.id) &&
-            !!o.isBackorder === isBack &&
-            (productId ? o.productId === productId : !o.productId && o.sku === sku && o.name === name),
-        );
-        const prev = prevIdx >= 0 ? oldItems[prevIdx] : null;
+        const sameProduct = (o: OrderItem) =>
+          productId ? o.productId === productId : !o.productId && o.sku === sku && o.name === name;
+        const prev =
+          oldItems.find((o) => o.id === item.fromItemId && sameProduct(o)) ??
+          oldItems.find((o) => !usedOld.has(o.id) && isOpenBackorder(o) === isBack && sameProduct(o)) ??
+          oldItems.find(sameProduct) ??
+          null;
         if (prev) usedOld.add(prev.id);
         if (keepSoldPrice && prev) unitPrice = Number(prev.unitPrice);
 
         const discountPct = Math.max(0, Math.min(100, item.discountPercent || 0));
 
-        const floorErrors = this.discountsService.checkCostFloor(
-          [
-            {
-              sku,
-              name,
-              unitPrice: unitPrice * (1 - discountPct / 100),
-              cost,
-              approvedPrice,
-            },
-          ],
-          userRole,
-          await this.tradeDiscounts.getMinMarginMultiplier(),
-        );
+        // A line keeping its price and discount isn't a new discount, so
+        // today's cost can't stop units being moved on it.
+        const priceUnchanged =
+          !!prev &&
+          Math.abs(Number(prev.unitPrice) - unitPrice) < 0.00005 &&
+          Math.abs(Number(prev.discountPercent) - discountPct) < 0.0000005;
+        const floorErrors = priceUnchanged
+          ? []
+          : this.discountsService.checkCostFloor(
+              [
+                {
+                  sku,
+                  name,
+                  unitPrice: unitPrice * (1 - discountPct / 100),
+                  cost,
+                  approvedPrice,
+                },
+              ],
+              userRole,
+              await this.tradeDiscounts.getMinMarginMultiplier(),
+            );
         if (floorErrors.length > 0) {
           throw new BadRequestException({
             code: 'BELOW_COST_FLOOR',
@@ -1586,6 +1600,9 @@ export class OrdersService {
         grossSubtotal += lineGross;
         itemDiscounts += lineDiscount;
 
+        // Units newly put on back order haven't been ordered yet, so they
+        // don't take a PO from the line they came off.
+        const keepPo = !isBack || (!!prev && isOpenBackorder(prev));
         persistedItems.push({
           orderId: order.id,
           productId,
@@ -1600,12 +1617,45 @@ export class OrdersService {
           isBackorder: isBack,
           isLaybyHeld: !!item.isLaybyHeld && !item.isBackorder,
           costPrice: prev?.costPrice ?? (cost != null && cost > 0 ? cost : null),
-          poNumber: prev?.poNumber ?? null,
-          poSentAt: prev?.poSentAt ?? null,
-          backorderFulfilledAt: prev?.backorderFulfilledAt ?? null,
+          promoLabel: prev?.promoLabel ?? null,
+          poNumber: keepPo ? prev?.poNumber ?? null : null,
+          poSentAt: keepPo ? prev?.poSentAt ?? null : null,
+          backorderFulfilledAt: null,
           backorderQty: prev && prev.backorderQty != null && prev.backorderQty < qty ? prev.backorderQty : null,
           supplier: prev?.supplier ?? null,
         });
+      }
+
+      // Moving units must not move the money, but a line rounds differently
+      // once it's cut in two. Lines that kept their product, price, discount
+      // and total quantity keep what they came to.
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      const sameSale = (l: Partial<OrderItem>) =>
+        [
+          l.productId ?? `${l.sku}|${l.name}`,
+          Number(l.unitPrice).toFixed(4),
+          Number(l.discountPercent).toFixed(6),
+        ].join('|');
+      const sumOf = (rows: Partial<OrderItem>[], f: (l: Partial<OrderItem>) => unknown) =>
+        rows.reduce((t, l) => t + Number(f(l) || 0), 0);
+      const newSales = new Set(persistedItems.map(sameSale));
+      let onlyMoved = newSales.size === new Set(oldItems.map(sameSale)).size;
+      for (const key of newSales) {
+        const now = persistedItems.filter((l) => sameSale(l) === key);
+        const was = oldItems.filter((l) => sameSale(l) === key);
+        if (!was.length || sumOf(was, (l) => l.quantity) !== sumOf(now, (l) => l.quantity)) {
+          onlyMoved = false;
+          continue;
+        }
+        const drift = r2(sumOf(was, (l) => l.rowTotal) - sumOf(now, (l) => l.rowTotal));
+        if (!drift) continue;
+        const last = now[now.length - 1];
+        const discount = Math.max(0, r2(Number(last.discountAmount) - drift));
+        itemDiscounts += discount - Number(last.discountAmount);
+        subtotal += drift;
+        last.discountAmount = discount;
+        last.rowTotal = r2(Number(last.rowTotal) + drift);
+        last.taxAmount = r2(Number(last.rowTotal) / 11);
       }
 
       subtotal = Math.round(subtotal * 100) / 100;
@@ -1628,9 +1678,13 @@ export class OrdersService {
       grossSubtotal = Math.round(grossSubtotal * 100) / 100;
       const totalDiscount = Math.round((itemDiscounts + cartDiscount) * 100) / 100;
       const goods = Math.round((subtotal - cartDiscount) * 100) / 100;
-      const taxAmount = Math.round((goods / 11) * 100) / 100;
-      const grandTotal =
-        Math.round((goods + Number(order.deliveryFee || 0)) * 100) / 100;
+      // Nothing bought or re-priced: the order's totals stand. A sale's total
+      // can sit a cent off the sum of its lines, and moving units or saving
+      // without a change mustn't leave a paid order owing that cent.
+      const taxAmount = onlyMoved ? Number(order.taxAmount) : Math.round((goods / 11) * 100) / 100;
+      const grandTotal = onlyMoved
+        ? Number(order.grandTotal)
+        : Math.round((goods + Number(order.deliveryFee || 0)) * 100) / 100;
 
       // Wipe existing rows + insert the new set. Simplest correct
       // approach — trying to diff line-by-line would be fragile given
@@ -1649,13 +1703,64 @@ export class OrdersService {
             ? PaymentStatus.PARTIAL
             : PaymentStatus.PENDING;
       await manager.update(Order, { id: order.id }, {
-        subtotal: grossSubtotal,
-        discountAmount: totalDiscount,
+        subtotal: onlyMoved ? Number(order.subtotal) : grossSubtotal,
+        discountAmount: onlyMoved ? Number(order.discountAmount) : totalDiscount,
         taxAmount,
         grandTotal,
         paymentStatus,
         updatedAt: new Date(),
       });
+
+      // Units moved between taken, back order and lay-by (Sally, 5 Nov
+      // 2026: one on back order turned out to be in stock).
+      const splitOf = (rows: Partial<OrderItem>[]) => {
+        const m = new Map<string, { name: string; productId: number | null; total: number; back: number; held: number }>();
+        for (const r of rows) {
+          const key = r.sku || r.name || '?';
+          const cur = m.get(key) ?? { name: r.name || key, productId: r.productId ?? null, total: 0, back: 0, held: 0 };
+          const q = Number(r.quantity) || 0;
+          cur.total += q;
+          if (isOpenBackorder(r)) cur.back += q;
+          else if (r.isLaybyHeld) cur.held += q;
+          m.set(key, cur);
+        }
+        return m;
+      };
+      const splitBefore = splitOf(oldItems);
+      const splitAfter = splitOf(persistedItems);
+      const splitChanges: string[] = [];
+      for (const key of new Set([...splitBefore.keys(), ...splitAfter.keys()])) {
+        const b = splitBefore.get(key);
+        const a = splitAfter.get(key);
+        const name = (a ?? b)?.name;
+        const was = { back: b?.back ?? 0, held: b?.held ?? 0 };
+        const now = { back: a?.back ?? 0, held: a?.held ?? 0 };
+        if (was.back !== now.back) splitChanges.push(`${name}: back order ${was.back} → ${now.back}`);
+        if (was.held !== now.held) splitChanges.push(`${name}: lay-by ${was.held} → ${now.held}`);
+        // Back orders don't take stock; taken and lay-by units do, as at
+        // the sale. Only when the quantity stayed the same: a changed
+        // quantity has never moved stock here.
+        const moved = was.back - now.back;
+        if (moved !== 0 && a?.productId && b?.total === a.total) {
+          await manager.update(
+            'products',
+            { id: a.productId },
+            {
+              stockQty: () => `stock_qty - (${moved})`,
+              isInStock: () => `CASE WHEN stock_qty - (${moved}) > 0 THEN 1 ELSE 0 END`,
+            },
+          );
+        }
+      }
+      // The order follows its lines, as with the per-line status menu. An
+      // edit that moves nothing leaves the status alone, so a finished sale
+      // that took more lights stays COMPLETE and owes the difference.
+      let completedNow = false;
+      if (splitChanges.length > 0) {
+        order.grandTotal = grandTotal;
+        order.paymentStatus = paymentStatus;
+        completedNow = await this.refreshStatusFromLines(manager, order, persistedItems as OrderItem[]);
+      }
 
       // Breadcrumb so pm2 logs show who edited what and how.
       // eslint-disable-next-line no-console
@@ -1707,6 +1812,7 @@ export class OrdersService {
         if (Math.abs(cart.amount - cartDiscount) > 0.005) {
           changes.push(`order discount $${cart.amount.toFixed(2)} → $${cartDiscount.toFixed(2)}`);
         }
+        changes.push(...splitChanges);
         if (changes.length > 0) {
           const editor = await manager.findOne(User, { where: { id: userId } });
           const who = editor
@@ -1717,7 +1823,9 @@ export class OrdersService {
               orderId: order.id,
               userId,
               type: 'items_changed',
-              description: `Items changed by ${who}: ${changes.join('; ')}. New total $${grandTotal.toFixed(2)}.`,
+              description:
+                `Items changed by ${who}: ${changes.join('; ')}. New total $${grandTotal.toFixed(2)}.` +
+                (completedNow ? ' Lay-by completed.' : ''),
             }),
           );
         }

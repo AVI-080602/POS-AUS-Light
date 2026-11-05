@@ -202,6 +202,7 @@ export const ordersApi = {
       isCustom?: boolean;
       sku?: string;
       name?: string;
+      fromItemId?: number;
     }>,
   ) => api.patch(`/orders/${orderId}/items`, { items }),
 

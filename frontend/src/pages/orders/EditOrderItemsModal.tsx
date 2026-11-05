@@ -14,6 +14,12 @@ import { ordersApi, productsApi } from '../../services/api';
 // Server rewrites the whole item set + re-totals + recomputes payment
 // status. Blocked server-side when the order is already
 // complete/refunded/cancelled.
+//
+// Back order and lay-by quantities work as on the Review Order screen at
+// checkout (Sally, 5 Nov 2026: one of a back order turned out to be in
+// stock and the numbers couldn't be changed, which is hard on large
+// orders). The server stores a split as separate lines, so each row here
+// is one product at one price, however many lines it sits on.
 
 interface Row {
   productId: number;
@@ -21,11 +27,104 @@ interface Row {
   name: string;
   quantity: number;
   unitPrice: number;
+  // Price on the order, or today's for a line just added.
+  soldPrice: number;
   discountPercent: number;
-  isBackorder: boolean;
-  isLaybyHeld: boolean;
+  // Units of `quantity` on back order / held on lay-by; the rest are taken.
+  backQty: number;
+  heldQty: number;
   isCustom: boolean;
+  poNumber?: string | null;
+  // The order's line behind each part, so the server keeps its details.
+  fromTaken?: number;
+  fromBack?: number;
+  fromHeld?: number;
 }
+
+// A back order already on a PO stays its own row: the supplier has been
+// asked for exactly those units. Lines from different suppliers stay apart
+// too.
+const buildRows = (items: any[]): Row[] => {
+  const rows = new Map<string, Row>();
+  for (const it of items) {
+    const open = !!it.isBackorder && !it.backorderFulfilledAt;
+    const unitPrice = Number(it.unitPrice);
+    const discountPercent = Number(it.discountPercent) || 0;
+    const key =
+      open && it.poNumber
+        ? `po|${it.id}`
+        : [it.productId ?? '', it.sku, it.name, unitPrice.toFixed(4), discountPercent.toFixed(6), it.supplier ?? ''].join('|');
+    let row = rows.get(key);
+    if (!row) {
+      row = {
+        productId: it.productId ?? -Date.now(),
+        sku: it.sku,
+        name: it.name,
+        quantity: 0,
+        unitPrice,
+        soldPrice: unitPrice,
+        discountPercent,
+        backQty: 0,
+        heldQty: 0,
+        isCustom: it.productId == null,
+        poNumber: open ? it.poNumber : null,
+      };
+      rows.set(key, row);
+    }
+    const qty = Number(it.quantity);
+    row.quantity += qty;
+    if (open) {
+      row.backQty += qty;
+      row.fromBack ??= it.id;
+    } else if (it.isLaybyHeld) {
+      row.heldQty += qty;
+      row.fromHeld ??= it.id;
+    } else {
+      row.fromTaken ??= it.id;
+    }
+  }
+  return [...rows.values()];
+};
+
+// A row can be part back order and part lay-by. Ticking the second takes a
+// unit off the first so the split shows straight away; a single unit can
+// only be one or the other. Same rules as OrderReviewModal.
+const tickBack = (r: Row, on: boolean): Partial<Row> => {
+  if (!on) return { backQty: 0 };
+  if (r.heldQty > 0 && r.quantity <= 1) return { backQty: r.quantity, heldQty: 0 };
+  const held = Math.min(r.quantity - 1, r.heldQty);
+  return { backQty: r.quantity - held, heldQty: held };
+};
+const tickHeld = (r: Row, on: boolean): Partial<Row> => {
+  if (!on) return { heldQty: 0 };
+  if (r.backQty > 0 && r.quantity <= 1) return { heldQty: r.quantity, backQty: 0 };
+  const back = Math.min(r.quantity - 1, r.backQty);
+  return { heldQty: r.quantity - back, backQty: back };
+};
+const typeBack = (r: Row, raw: number): Partial<Row> => {
+  const n = Math.max(1, Math.min(r.quantity - (r.heldQty > 0 ? 1 : 0), raw || 1));
+  return { backQty: n, heldQty: r.heldQty > 0 ? Math.max(1, Math.min(r.heldQty, r.quantity - n)) : 0 };
+};
+const typeHeld = (r: Row, raw: number): Partial<Row> => {
+  const n = Math.max(1, Math.min(r.quantity - (r.backQty > 0 ? 1 : 0), raw || 1));
+  return { heldQty: n, backQty: r.backQty > 0 ? Math.max(1, Math.min(r.backQty, r.quantity - n)) : 0 };
+};
+// A row wholly on back order or lay-by stays that way when its quantity
+// changes; a split row keeps its numbers as far as they still fit.
+const changeQty = (r: Row, raw: number): Partial<Row> => {
+  const quantity = Math.max(1, raw || 1);
+  const backQty = r.backQty === r.quantity ? quantity : Math.min(r.backQty, quantity);
+  const heldQty = r.heldQty === r.quantity ? quantity : Math.min(r.heldQty, quantity - backQty);
+  return { quantity, backQty, heldQty };
+};
+
+// Catalogue lines sell at the price they were sold at; only a line wholly
+// on back order can have its price typed over.
+const priceEditable = (r: Row) => r.isCustom || (r.backQty > 0 && r.backQty === r.quantity);
+const applyPatch = (r: Row, patch: Partial<Row>): Row => {
+  const next = { ...r, ...patch };
+  return priceEditable(next) ? next : { ...next, unitPrice: next.soldPrice };
+};
 
 interface Props {
   order: any;
@@ -34,20 +133,7 @@ interface Props {
 }
 
 export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) {
-  const [rows, setRows] = useState<Row[]>(() =>
-    (order.items || []).map((it: any) => ({
-      productId: it.productId ?? -Date.now(),
-      sku: it.sku,
-      name: it.name,
-      quantity: Number(it.quantity),
-      unitPrice: Number(it.unitPrice),
-      discountPercent: Number(it.discountPercent) || 0,
-      isBackorder: !!it.isBackorder && !it.backorderFulfilledAt,
-      // Sent back so an edit doesn't turn lay-by lines into taken ones.
-      isLaybyHeld: !!it.isLaybyHeld,
-      isCustom: it.productId == null,
-    })),
-  );
+  const [rows, setRows] = useState<Row[]>(() => buildRows(order.items || []));
   const [saving, setSaving] = useState(false);
 
   // Product search for the "add" panel
@@ -114,9 +200,10 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
         name,
         quantity: qty,
         unitPrice: Math.round(price * 100) / 100,
+        soldPrice: Math.round(price * 100) / 100,
         discountPercent: 0,
-        isBackorder: false,
-        isLaybyHeld: false,
+        backQty: 0,
+        heldQty: 0,
         isCustom: true,
       },
     ]);
@@ -128,7 +215,7 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
   };
 
   const updateRow = (i: number, patch: Partial<Row>) =>
-    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+    setRows((prev) => prev.map((r, idx) => (idx === i ? applyPatch(r, patch) : r)));
 
   const removeRow = (i: number) =>
     setRows((prev) => prev.filter((_, idx) => idx !== i));
@@ -146,9 +233,10 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
         name: p.name,
         quantity: 1,
         unitPrice: Number(p.price),
+        soldPrice: Number(p.price),
         discountPercent: 0,
-        isBackorder: false,
-        isLaybyHeld: false,
+        backQty: 0,
+        heldQty: 0,
         isCustom: false,
       },
     ]);
@@ -184,17 +272,36 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
     try {
       await ordersApi.updateItems(
         order.id,
-        rows.map((r) => ({
-          productId: r.productId,
-          quantity: r.quantity,
-          discountPercent: r.discountPercent,
-          unitPrice: r.isBackorder || r.isCustom ? r.unitPrice : undefined,
-          isBackorder: r.isBackorder,
-          isLaybyHeld: r.isLaybyHeld && !r.isBackorder,
-          isCustom: r.isCustom,
-          sku: r.isCustom ? r.sku : undefined,
-          name: r.isCustom ? r.name : undefined,
-        })),
+        rows.flatMap((r) => {
+          const line = {
+            productId: r.productId,
+            discountPercent: r.discountPercent,
+            isCustom: r.isCustom,
+            sku: r.isCustom ? r.sku : undefined,
+            name: r.isCustom ? r.name : undefined,
+            unitPrice: r.isCustom ? r.unitPrice : undefined,
+          };
+          const anyLine = r.fromBack ?? r.fromTaken ?? r.fromHeld;
+          const taken = r.quantity - r.backQty - r.heldQty;
+          // In the order checkout stores them: taken, back order, lay-by.
+          return [
+            ...(taken > 0 ? [{ ...line, quantity: taken, fromItemId: r.fromTaken ?? anyLine }] : []),
+            ...(r.backQty > 0
+              ? [
+                  {
+                    ...line,
+                    quantity: r.backQty,
+                    isBackorder: true,
+                    unitPrice: r.isCustom || r.unitPrice !== r.soldPrice ? r.unitPrice : undefined,
+                    fromItemId: r.fromBack ?? anyLine,
+                  },
+                ]
+              : []),
+            ...(r.heldQty > 0
+              ? [{ ...line, quantity: r.heldQty, isLaybyHeld: true, fromItemId: r.fromHeld ?? anyLine }]
+              : []),
+          ];
+        }),
       );
       toast.success('Order updated');
       onSaved();
@@ -210,7 +317,7 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
   return (
     <div className="modal-backdrop-top">
       <div className="modal-content">
-        <div className="max-w-4xl mx-auto pb-8">
+        <div className="max-w-6xl mx-auto pb-8">
           <div className="flex justify-between items-center py-4">
             <div>
               <h2 className="text-xl font-bold text-pos-text">Edit Order Items</h2>
@@ -236,6 +343,35 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                   <th className="text-right py-2 w-24">Unit</th>
                   <th className="text-center py-2 w-20">Disc %</th>
                   <th className="text-right py-2 w-24">Line</th>
+                  {/* Headers tick every line, as on Review Order. */}
+                  {(
+                    [
+                      ['Back Order', (r: Row) => r.backQty > 0, tickBack],
+                      ['Lay By', (r: Row) => r.heldQty > 0, tickHeld],
+                    ] as const
+                  ).map(([label, isOn, tick]) => {
+                    const selected = rows.filter(isOn).length;
+                    const all = rows.length > 0 && selected === rows.length;
+                    return (
+                      <th key={label} className="text-center py-2 w-32">
+                        <label className="inline-flex items-center justify-center gap-1.5 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4"
+                            title={`Mark every line as ${label}`}
+                            checked={all}
+                            ref={(el) => {
+                              if (el) el.indeterminate = selected > 0 && !all;
+                            }}
+                            onChange={(e) =>
+                              setRows((prev) => prev.map((r) => applyPatch(r, tick(r, e.target.checked))))
+                            }
+                          />
+                          {label}
+                        </label>
+                      </th>
+                    );
+                  })}
                   <th className="w-10"></th>
                 </tr>
               </thead>
@@ -246,22 +382,35 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                       <div className="text-sm">{r.name}</div>
                       <div className="text-xs text-gray-500">
                         {r.sku}
-                        {r.isBackorder && (
-                          <span className="ml-2 px-1.5 py-0.5 rounded bg-cyan-600/30 text-cyan-300 text-[10px] font-semibold uppercase">
-                            Backorder
-                          </span>
-                        )}
-                        {r.isLaybyHeld && !r.isBackorder && (
-                          <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-600/30 text-amber-300 text-[10px] font-semibold uppercase">
-                            Lay-by
-                          </span>
-                        )}
                         {r.isCustom && (
                           <span className="ml-2 px-1.5 py-0.5 rounded bg-purple-600/30 text-purple-300 text-[10px] font-semibold uppercase">
                             Custom
                           </span>
                         )}
+                        {r.poNumber && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded bg-cyan-600/30 text-cyan-300 text-[10px] font-semibold uppercase">
+                            {r.poNumber}
+                          </span>
+                        )}
                       </div>
+                      {(r.backQty > 0 || r.heldQty > 0) && (
+                        <div className="text-[11px] mt-0.5 text-gray-400">
+                          {[
+                            r.backQty > 0 && <span key="b" className="text-cyan-300">{r.backQty} on back order</span>,
+                            r.heldQty > 0 && <span key="h" className="text-amber-300">{r.heldQty} held on lay by</span>,
+                            r.quantity - r.backQty - r.heldQty > 0 && (
+                              <span key="t">{r.quantity - r.backQty - r.heldQty} taken</span>
+                            ),
+                          ]
+                            .filter(Boolean)
+                            .map((part, n) => (
+                              <span key={n}>
+                                {n > 0 && ' · '}
+                                {part}
+                              </span>
+                            ))}
+                        </div>
+                      )}
                     </td>
                     <td className="py-2 text-center">
                       <input
@@ -269,11 +418,7 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                         min={1}
                         className="w-16 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-center text-pos-text"
                         value={r.quantity}
-                        onChange={(e) =>
-                          updateRow(i, {
-                            quantity: Math.max(1, parseInt(e.target.value) || 1),
-                          })
-                        }
+                        onChange={(e) => updateRow(i, changeQty(r, parseInt(e.target.value)))}
                       />
                     </td>
                     <td className="py-2 text-right">
@@ -283,14 +428,14 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                         min={0}
                         className="w-20 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-right text-pos-text disabled:opacity-40"
                         value={r.unitPrice}
-                        disabled={!r.isBackorder && !r.isCustom}
+                        disabled={!priceEditable(r)}
                         onChange={(e) =>
                           updateRow(i, {
                             unitPrice: Math.max(0, parseFloat(e.target.value) || 0),
                           })
                         }
                         title={
-                          !r.isBackorder && !r.isCustom
+                          !priceEditable(r)
                             ? 'Catalogue items sell at DB price. Use Disc % to adjust.'
                             : undefined
                         }
@@ -316,6 +461,36 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                     <td className="py-2 text-right font-semibold">
                       ${rowLineTotal(r).toFixed(2)}
                     </td>
+                    {(
+                      [
+                        ['Back order', r.backQty, tickBack, typeBack],
+                        ['Lay by', r.heldQty, tickHeld, typeHeld],
+                      ] as const
+                    ).map(([label, qty, tick, type]) => (
+                      <td key={label} className="py-2 text-center">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 cursor-pointer"
+                          aria-label={`${label}: ${r.name}`}
+                          checked={qty > 0}
+                          onChange={(e) => updateRow(i, tick(r, e.target.checked))}
+                        />
+                        {qty > 0 && r.quantity > 1 && (
+                          <div className="flex items-center justify-center gap-1 mt-1 text-xs">
+                            <input
+                              type="number"
+                              min={1}
+                              max={r.quantity}
+                              aria-label={`${label} quantity: ${r.name}`}
+                              className="input w-14 text-center py-0.5 px-1 text-xs min-h-0"
+                              value={qty}
+                              onChange={(e) => updateRow(i, type(r, parseInt(e.target.value)))}
+                            />
+                            <span className="text-gray-500">of {r.quantity}</span>
+                          </div>
+                        )}
+                      </td>
+                    ))}
                     <td className="py-2 text-center">
                       <button
                         onClick={() => removeRow(i)}
