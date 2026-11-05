@@ -15,7 +15,7 @@ import { formatPhone } from '../../utils/phone';
 // except End of Day (the till since its last close) and Backorders
 // (everything still open).
 type Tab =
-  | 'eod' | 'summary' | 'pl' | 'clearance' | 'items' | 'trade' | 'staff' | 'customers' | 'backorders'
+  | 'eod' | 'summary' | 'pl' | 'clearance' | 'items' | 'belowcost' | 'trade' | 'staff' | 'customers' | 'backorders'
   | 'discounts' | 'quotes';
 
 const TABS: Array<{ id: Tab; label: string; filters: boolean; groupBy?: boolean }> = [
@@ -24,6 +24,7 @@ const TABS: Array<{ id: Tab; label: string; filters: boolean; groupBy?: boolean 
   { id: 'pl', label: 'Profit & Loss', filters: true, groupBy: true },
   { id: 'clearance', label: 'Clearance', filters: true, groupBy: true },
   { id: 'items', label: 'Sales by Item', filters: true },
+  { id: 'belowcost', label: 'Below Cost', filters: false },
   { id: 'trade', label: 'Trade', filters: true, groupBy: true },
   { id: 'staff', label: 'Sales by Staff', filters: true },
   { id: 'customers', label: 'Customers', filters: true },
@@ -161,6 +162,7 @@ export default function ReportsPage() {
       {tab === 'pl' && <ProfitLoss params={params} />}
       {tab === 'clearance' && <Clearance params={params} />}
       {tab === 'items' && <SalesByItem params={params} showCost={!isStaff} />}
+      {tab === 'belowcost' && <BelowCost />}
       {tab === 'trade' && <Trade params={params} onCustomer={setHistoryFor} />}
       {tab === 'staff' && <Staff params={params} />}
       {tab === 'customers' && <Customers params={params} onCustomer={setHistoryFor} />}
@@ -603,6 +605,94 @@ function SalesByItem({ params, showCost = true }: { params: ReportRange; showCos
         )}
       </State>
     </div>
+  );
+}
+
+// ============================================================ BELOW COST
+// Today's prices, not sales, so no date filters. Managers and admins only:
+// it shows cost (Sally, 5 Nov 2026).
+type BelowCostRow = {
+  id: number; sku: string; name: string; supplier: string | null; rrp: number; price: number; onSale: boolean;
+  cost: number; minPrice: number; overCost: number; overCostPct: number; stock: number; belowCost: boolean;
+};
+const belowCostColumns = (marginPct: number): Col<BelowCostRow>[] => [
+  { key: 'sku', label: 'SKU', value: (r) => r.sku },
+  { key: 'name', label: 'Product', value: (r) => r.name },
+  { key: 'sup', label: 'Supplier', value: (r) => r.supplier ?? '' },
+  { key: 'rrp', label: 'RRP', align: 'right', value: (r) => r.rrp, render: (r) => money(r.rrp) },
+  { key: 'price', label: 'Selling at', align: 'right', value: (r) => r.price, render: (r) => money(r.price) },
+  { key: 'sale', label: 'On sale', align: 'center', value: (r) => (r.onSale ? 'Yes' : 'No') },
+  { key: 'cost', label: 'Cost', align: 'right', value: (r) => r.cost, render: (r) => money(r.cost) },
+  { key: 'min', label: `Cost + ${marginPct}%`, align: 'right', value: (r) => r.minPrice, render: (r) => money(r.minPrice) },
+  {
+    key: 'over', label: 'Above / below cost', align: 'right', value: (r) => r.overCost,
+    render: (r) => <span className={r.belowCost ? 'text-red-500 font-semibold' : ''}>{money(r.overCost)}</span>,
+  },
+  {
+    key: 'pct', label: '% of cost', align: 'right', value: (r) => r.overCostPct,
+    render: (r) => <span className={r.belowCost ? 'text-red-500 font-semibold' : ''}>{pct(r.overCostPct)}</span>,
+  },
+  { key: 'stock', label: 'Stock', align: 'right', value: (r) => r.stock, render: (r) => int(r.stock) },
+];
+
+function BelowCost() {
+  const [show, setShow] = useState<'cost' | 'margin'>('cost');
+  const [search, setSearch] = useState('');
+  const { data, loading, error } = useReport<{
+    minMarginPercent: number; checked: number; belowCost: number; belowMargin: number; items: BelowCostRow[];
+  }>(() => reportsApi.belowCost(), []);
+  const q = search.trim().toLowerCase();
+  const rows = (data?.items || []).filter(
+    (r) =>
+      (show === 'margin' || r.belowCost) &&
+      (!q || [r.sku, r.name, r.supplier || ''].some((v) => v.toLowerCase().includes(q))),
+  );
+  return (
+    <State loading={loading} error={error}>
+      {data && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {(
+              [
+                ['cost', `Below cost (${int(data.belowCost)})`],
+                ['margin', `Below cost + ${data.minMarginPercent}% (${int(data.belowMargin)})`],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setShow(id)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                  show === id ? 'bg-primary-600 text-white' : 'bg-pos-accent text-gray-300 hover:text-pos-text'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            <input
+              className="input w-full md:w-96"
+              placeholder="Filter by SKU, product or supplier…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <DataTable
+            title={`${int(rows.length)} products`}
+            csvName={show === 'cost' ? 'below-cost.csv' : 'below-minimum-margin.csv'}
+            rows={rows}
+            columns={belowCostColumns(data.minMarginPercent)}
+            maxHeight={620}
+            initialSort={{ key: 'pct', dir: 'asc' }}
+            empty="Nothing below cost."
+          />
+          <Note>
+            Today's prices against the cost on the product, both inc GST. Selling at is what a customer pays
+            today, so the sale price while one is running. Below cost + {data.minMarginPercent}% is the same
+            check as the Below minimum margin warning at the till. Checked {int(data.checked)} active products
+            with a cost on file; products with no cost can't be checked. Click a column to sort.
+          </Note>
+        </div>
+      )}
+    </State>
   );
 }
 

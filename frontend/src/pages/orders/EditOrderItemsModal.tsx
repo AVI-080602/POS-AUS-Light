@@ -19,7 +19,9 @@ import { ordersApi, productsApi } from '../../services/api';
 // checkout (Sally, 5 Nov 2026: one of a back order turned out to be in
 // stock and the numbers couldn't be changed, which is hard on large
 // orders). The server stores a split as separate lines, so each row here
-// is one product at one price, however many lines it sits on.
+// is one product at one price, however many lines it sits on. They have
+// their own screen behind a button, so Edit Order Items itself stays as it
+// was (Sally, 5 Nov 2026: "we still need to keep this").
 
 interface Row {
   productId: number;
@@ -135,6 +137,8 @@ interface Props {
 export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) {
   const [rows, setRows] = useState<Row[]>(() => buildRows(order.items || []));
   const [saving, setSaving] = useState(false);
+  // The Back Order / Lay By quantities screen, over the same rows.
+  const [splitView, setSplitView] = useState(false);
 
   // Product search for the "add" panel
   const [showAddSearch, setShowAddSearch] = useState(false);
@@ -317,12 +321,17 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
   return (
     <div className="modal-backdrop-top">
       <div className="modal-content">
-        <div className="max-w-6xl mx-auto pb-8">
+        <div className={`${splitView ? 'max-w-5xl' : 'max-w-4xl'} mx-auto pb-8`}>
           <div className="flex justify-between items-center py-4">
             <div>
-              <h2 className="text-xl font-bold text-pos-text">Edit Order Items</h2>
+              <h2 className="text-xl font-bold text-pos-text">
+                {splitView ? 'Back Order / Lay By Quantities' : 'Edit Order Items'}
+              </h2>
               <p className="text-xs text-gray-400">
-                {order.orderNumber} · status {order.status}
+                {order.orderNumber} ·{' '}
+                {splitView
+                  ? 'mark what is on back order or lay by; the rest is taken'
+                  : `status ${order.status}`}
               </p>
             </div>
             <button
@@ -341,10 +350,10 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                   <th className="text-left py-2">Item</th>
                   <th className="text-center py-2 w-20">Qty</th>
                   <th className="text-right py-2 w-24">Unit</th>
-                  <th className="text-center py-2 w-20">Disc %</th>
+                  {!splitView && <th className="text-center py-2 w-20">Disc %</th>}
                   <th className="text-right py-2 w-24">Line</th>
                   {/* Headers tick every line, as on Review Order. */}
-                  {(
+                  {splitView && (
                     [
                       ['Back Order', (r: Row) => r.backQty > 0, tickBack],
                       ['Lay By', (r: Row) => r.heldQty > 0, tickHeld],
@@ -372,7 +381,7 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                       </th>
                     );
                   })}
-                  <th className="w-10"></th>
+                  {!splitView && <th className="w-10"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
@@ -413,55 +422,65 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                       )}
                     </td>
                     <td className="py-2 text-center">
-                      <input
-                        type="number"
-                        min={1}
-                        className="w-16 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-center text-pos-text"
-                        value={r.quantity}
-                        onChange={(e) => updateRow(i, changeQty(r, parseInt(e.target.value)))}
-                      />
+                      {splitView ? (
+                        r.quantity
+                      ) : (
+                        <input
+                          type="number"
+                          min={1}
+                          className="w-16 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-center text-pos-text"
+                          value={r.quantity}
+                          onChange={(e) => updateRow(i, changeQty(r, parseInt(e.target.value)))}
+                        />
+                      )}
                     </td>
                     <td className="py-2 text-right">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        className="w-20 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-right text-pos-text disabled:opacity-40"
-                        value={r.unitPrice}
-                        disabled={!priceEditable(r)}
-                        onChange={(e) =>
-                          updateRow(i, {
-                            unitPrice: Math.max(0, parseFloat(e.target.value) || 0),
-                          })
-                        }
-                        title={
-                          !priceEditable(r)
-                            ? 'Catalogue items sell at DB price. Use Disc % to adjust.'
-                            : undefined
-                        }
-                      />
+                      {splitView ? (
+                        `$${r.unitPrice.toFixed(2)}`
+                      ) : (
+                        <input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          className="w-20 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-right text-pos-text disabled:opacity-40"
+                          value={r.unitPrice}
+                          disabled={!priceEditable(r)}
+                          onChange={(e) =>
+                            updateRow(i, {
+                              unitPrice: Math.max(0, parseFloat(e.target.value) || 0),
+                            })
+                          }
+                          title={
+                            !priceEditable(r)
+                              ? 'Catalogue items sell at DB price. Use Disc % to adjust.'
+                              : undefined
+                          }
+                        />
+                      )}
                     </td>
-                    <td className="py-2 text-center">
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        className="w-14 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-center text-pos-text"
-                        value={r.discountPercent}
-                        onChange={(e) =>
-                          updateRow(i, {
-                            discountPercent: Math.max(
-                              0,
-                              Math.min(100, parseFloat(e.target.value) || 0),
-                            ),
-                          })
-                        }
-                      />
-                    </td>
+                    {!splitView && (
+                      <td className="py-2 text-center">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          className="w-14 bg-pos-bg border border-gray-700 rounded px-2 py-1 text-center text-pos-text"
+                          value={r.discountPercent}
+                          onChange={(e) =>
+                            updateRow(i, {
+                              discountPercent: Math.max(
+                                0,
+                                Math.min(100, parseFloat(e.target.value) || 0),
+                              ),
+                            })
+                          }
+                        />
+                      </td>
+                    )}
                     <td className="py-2 text-right font-semibold">
                       ${rowLineTotal(r).toFixed(2)}
                     </td>
-                    {(
+                    {splitView && (
                       [
                         ['Back order', r.backQty, tickBack, typeBack],
                         ['Lay by', r.heldQty, tickHeld, typeHeld],
@@ -491,21 +510,24 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                         )}
                       </td>
                     ))}
-                    <td className="py-2 text-center">
-                      <button
-                        onClick={() => removeRow(i)}
-                        className="text-gray-500 hover:text-red-400"
-                        title="Remove line"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
-                    </td>
+                    {!splitView && (
+                      <td className="py-2 text-center">
+                        <button
+                          onClick={() => removeRow(i)}
+                          className="text-gray-500 hover:text-red-400"
+                          title="Remove line"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
 
             {/* Add product panel */}
+            {!splitView && (
             <div className="mt-4 pt-4 border-t border-gray-800">
               {showCustom ? (
                 <div className="space-y-2">
@@ -554,7 +576,7 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                   </div>
                 </div>
               ) : !showAddSearch ? (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => setShowAddSearch(true)}
                     className="btn bg-primary-600 text-white flex items-center gap-2"
@@ -567,6 +589,14 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                     title="A light that isn't in the catalogue — type its description and price"
                   >
                     <PlusIcon className="h-5 w-5" /> Add custom item
+                  </button>
+                  <button
+                    onClick={() => setSplitView(true)}
+                    disabled={rows.length === 0}
+                    className="btn bg-cyan-700 text-white disabled:opacity-50"
+                    title="Change how many of each line are on back order or lay by, as on the Review Order screen"
+                  >
+                    Edit Back Order / Lay By Quantities
                   </button>
                 </div>
               ) : (
@@ -613,6 +643,7 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
                 </div>
               )}
             </div>
+            )}
 
             {/* Totals */}
             <div className="mt-4 pt-4 border-t border-gray-800 flex justify-end">
@@ -646,11 +677,11 @@ export default function EditOrderItemsModal({ order, onClose, onSaved }: Props) 
 
           <div className="flex justify-end gap-2 mt-4">
             <button
-              onClick={onClose}
+              onClick={splitView ? () => setSplitView(false) : onClose}
               disabled={saving}
               className="btn bg-gray-700 text-pos-text"
             >
-              Cancel
+              {splitView ? 'Back to Edit Items' : 'Cancel'}
             </button>
             <button
               onClick={handleSave}

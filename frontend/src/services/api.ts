@@ -409,6 +409,7 @@ export const reportsApi = {
   clearance: (params: ReportRange) => api.get('/reports/clearance', { params }),
   items: (params: ReportRange & { search?: string; tradeOnly?: boolean; limit?: number }) =>
     api.get('/reports/items', { params }),
+  belowCost: () => api.get('/reports/below-cost'),
   trade: (params: ReportRange) => api.get('/reports/trade', { params }),
   staff: (params: ReportRange) => api.get('/reports/staff', { params }),
   customers: (params: ReportRange & { limit?: number }) => api.get('/reports/customers', { params }),

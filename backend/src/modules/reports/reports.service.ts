@@ -6,6 +6,8 @@ import { PurchaseOrder } from './entities/purchase-order.entity';
 import { OrderEvent } from '../orders/entities/order-event.entity';
 import { User } from '../users/entities/user.entity';
 import { cleanSupplierName, ALWAYS_LISTED_SUPPLIERS } from './supplier-name';
+import { Product } from '../products/entities/product.entity';
+import { TradeDiscountsService } from '../products/trade-discounts.service';
 
 // ---------------------------------------------------------------------
 // Reporting (Sally, Oct 2026). All money is GST-inclusive as stored
@@ -47,6 +49,7 @@ export class ReportsService {
     private readonly dataSource: DataSource,
     @InjectRepository(DayClose)
     private readonly dayCloseRepo: Repository<DayClose>,
+    private readonly tradeDiscounts: TradeDiscountsService,
   ) {}
 
   // ------------------------------------------------------------ helpers
@@ -525,6 +528,78 @@ export class ReportsService {
       }),
       // Old-invoice lines are free text with no product code.
       unitemised: { lines: n(un.lineCount), revenue: r2(n(un.revenue)) },
+    };
+  }
+
+  // ------------------------------------------------------------ below cost
+  // Products priced today under their cost, or under cost + the minimum
+  // margin: the same test as the till's "Below minimum margin" warning
+  // (Sally, 5 Nov 2026). The price is what a customer pays today, so the
+  // special price while one runs. Price and cost are both inc GST.
+  async belowCost() {
+    const minMarginPercent = await this.tradeDiscounts.getMinMarginPercent();
+    const multiplier = 1 + minMarginPercent / 100;
+    const products: any[] = await this.dataSource.query(
+      `SELECT p.id, p.sku, p.name, p.price, p.special_price specialPrice, p.special_price_from specialFrom,
+              p.special_price_to specialTo, p.cost, p.stock_qty stock
+         FROM products p
+        WHERE p.is_active = 1 AND p.cost > 0 AND p.price > 0`,
+    );
+    const items = products.flatMap((p) => {
+      const onSale = Product.isOnSale(p.price, p.specialPrice, p.specialFrom, p.specialTo);
+      const price = onSale ? n(p.specialPrice) : n(p.price);
+      const cost = n(p.cost);
+      if (price >= cost * multiplier - 0.005) return [];
+      return [{
+        id: Number(p.id),
+        sku: p.sku as string,
+        name: p.name as string,
+        supplier: null as string | null,
+        rrp: r2(n(p.price)),
+        price: r2(price),
+        onSale,
+        cost: r2(cost),
+        minPrice: r2(cost * multiplier),
+        overCost: r2(price - cost),
+        overCostPct: r2(((price - cost) / cost) * 100),
+        stock: n(p.stock),
+        belowCost: price < cost - 0.005,
+      }];
+    });
+    if (items.length > 0) {
+      // First price list holding the SKU, else the brand category, as on
+      // the Backorders report.
+      const lists: Array<{ sku: string; supplier: string }> = await this.dataSource.query(
+        `SELECT sku, supplier FROM supplier_costs WHERE sku IN (${items.map(() => '?').join(',')}) ORDER BY id`,
+        items.map((i) => i.sku),
+      );
+      const bySku = new Map<string, string>();
+      for (const l of lists) {
+        const key = l.sku.toLowerCase();
+        if (!bySku.has(key)) bySku.set(key, cleanSupplierName(l.supplier));
+      }
+      const brands: Array<{ productId: number; name: string }> = await this.dataSource.query(
+        `SELECT pc.product_id productId, cat.name
+           FROM product_categories pc
+           JOIN categories cat ON cat.id = pc.category_id
+           JOIN categories par ON par.id = cat.parent_id AND par.name = 'Brands'
+          WHERE pc.product_id IN (${items.map(() => '?').join(',')}) ORDER BY cat.id`,
+        items.map((i) => i.id),
+      );
+      const byProduct = new Map<number, string>();
+      for (const b of brands) {
+        const id = Number(b.productId);
+        if (!byProduct.has(id)) byProduct.set(id, cleanSupplierName(b.name));
+      }
+      for (const i of items) i.supplier = bySku.get(i.sku.toLowerCase()) || byProduct.get(i.id) || null;
+    }
+    items.sort((a, b) => a.overCostPct - b.overCostPct);
+    return {
+      minMarginPercent,
+      checked: products.length,
+      belowCost: items.filter((i) => i.belowCost).length,
+      belowMargin: items.length,
+      items,
     };
   }
 

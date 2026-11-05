@@ -95,6 +95,13 @@ export class ReportsController {
     return { success: true, data };
   }
 
+  // ---- Products priced under cost or the minimum margin, at today's prices
+  @Get('below-cost')
+  @ApiOperation({ summary: 'Products priced below cost, or below cost + the minimum margin' })
+  async belowCost() {
+    return { success: true, data: await this.reportsService.belowCost() };
+  }
+
   // ---- Trade: summary + best customers + top products, trade sales only
   @Get('trade')
   @ApiOperation({ summary: 'Trade-only sales summary, best trade customers and top products' })
