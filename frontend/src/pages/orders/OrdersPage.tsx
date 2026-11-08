@@ -361,7 +361,7 @@ export default function OrdersPage() {
       });
       // The order screen takes the balance payment inline (Sally, 10 Sep,
       // row 467: open orders in the Balance Payment format).
-      setLaybyPayAmount(balanceDue(full).toFixed(2));
+      setLaybyPayAmount(balanceDue({ ...full, refunds: refundsRes.data.data.refunds }).toFixed(2));
       setLaybyPayMethod('eftpos');
       setLaybyPayRef('');
     } catch (error) {
@@ -704,11 +704,39 @@ export default function OrdersPage() {
       : (o?.payments || [])
           .filter((p: any) => !p.status || p.status === 'completed')
           .reduce((s: number, p: any) => s + Number(p.amount || 0), 0);
-  const balanceDue = (o: any) =>
-    Math.max(
+  // Goods handed back and money returned on an order (needs its refunds).
+  const refundedOn = (o: any) => ({
+    returned: (o?.refunds || []).reduce(
+      (s: number, r: any) => s + (r.items || []).reduce((t: number, i: any) => t + Number(i.amount || 0), 0),
       0,
-      Math.round((parseFloat(o.grandTotal) - paidTotal(o)) * 100) / 100,
-    );
+    ),
+    refunded: (o?.refunds || []).reduce((s: number, r: any) => s + Number(r.refundAmount || 0), 0),
+  });
+  // A customer only owes for what they're keeping (Sally, 7 Nov 2026).
+  const balanceDue = (o: any) => {
+    const { returned, refunded } = refundedOn(o);
+    const keeping = Math.max(0, parseFloat(o.grandTotal) - returned);
+    const netPaid = Math.max(0, paidTotal(o) - refunded);
+    return Math.max(0, Math.round((keeping - netPaid) * 100) / 100);
+  };
+  // What the items ticked for refund will actually return. Same sum as
+  // refundableAmount on the server: what's been paid beyond the value of
+  // the goods being kept, never more than the goods coming back.
+  const refundPreview = (() => {
+    if (!refundOrder) return { due: 0, paid: 0, owing: 0 };
+    const { returned, refunded } = refundedOn(refundOrder);
+    const total = parseFloat(refundOrder.grandTotal);
+    const paid =
+      !(refundOrder.payments || []).some((p: any) => !p.status || p.status === 'completed') &&
+      refundOrder.paymentStatus === 'paid'
+        ? total
+        : paidTotal(refundOrder);
+    const keeping = Math.max(0, total - returned - refundTotal);
+    const spare = Math.max(0, paid - refunded - keeping);
+    const due = Math.round(Math.min(refundTotal, spare) * 100) / 100;
+    const owing = Math.max(0, Math.round((keeping - Math.max(0, paid - refunded - due)) * 100) / 100);
+    return { due, paid, owing };
+  })();
   // Orders that can take a balance payment via the PAY flow: laybys and
   // backorders that took a deposit (Sally, 9 Sep: POS ORDER 0067 needs a
   // PAY button so the customer can complete payment), and a finished sale
@@ -717,7 +745,8 @@ export default function OrdersPage() {
     !isWebOrder(o) &&
     (['layby_active', 'layby_expired'].includes(o.status) ||
       (['backorder_pending', 'pending', 'processing', 'complete'].includes(o.status) &&
-        o.paymentStatus !== 'paid'));
+        o.paymentStatus !== 'paid') ||
+      (o.status === 'refund_in_process' && balanceDue(o) > 0.005));
 
   // Customer ticket for the box (Sally, 16 Oct 2026). Website orders keep
   // the buyer's phone in the import note.
@@ -1616,19 +1645,23 @@ export default function OrdersPage() {
                                 title="Put this many on back order — it goes on Reports > Backorders"
                                 onClick={() => handleWebLine(selectedOrder, item, 'backorder')}
                               >
-                                Back Order
+                                {/* It read as a status, so the order looked
+                                    as if it was already on back order
+                                    (Sally, 7 Nov 2026). */}
+                                {openBackorder ? 'Update Qty' : 'Put on Back Order'}
                               </button>
-                              {openBackorder && (
-                                <button
-                                  type="button"
-                                  className="btn-primary btn-sm bg-green-600 hover:bg-green-700"
-                                  disabled={itemStatusSaving === item.id}
-                                  title="Stock is in — take it off the back orders"
-                                  onClick={() => handleWebLine(selectedOrder, item, 'complete')}
-                                >
-                                  Complete
-                                </button>
-                              )}
+                              {/* Keeps its space when hidden: appearing under
+                                  the pointer, a double click marked the line
+                                  complete. */}
+                              <button
+                                type="button"
+                                className={`btn-primary btn-sm bg-green-600 hover:bg-green-700 ${openBackorder ? '' : 'invisible'}`}
+                                disabled={!openBackorder || itemStatusSaving === item.id}
+                                title="Stock is in — take it off the back orders"
+                                onClick={() => handleWebLine(selectedOrder, item, 'complete')}
+                              >
+                                Complete
+                              </button>
                             </span>
                           )}
                           <span className="font-medium">${parseFloat(item.rowTotal).toFixed(2)}</span>
@@ -1906,10 +1939,10 @@ export default function OrdersPage() {
                     (s: number, r: any) => s + Number(r.refundAmount || 0),
                     0,
                   );
-                  const netPaid =
-                    Math.round(
-                      (parseFloat(selectedOrder.grandTotal) - totalRefunded) * 100,
-                    ) / 100;
+                  const netPaid = Math.max(
+                    0,
+                    Math.round((paidTotal(selectedOrder) - totalRefunded) * 100) / 100,
+                  );
                   return (
                     <div className="mt-2 pt-2 border-t border-gray-700 space-y-1">
                       <div className="flex justify-between text-sm text-orange-300">
@@ -2605,7 +2638,7 @@ export default function OrdersPage() {
                 <span className="text-sm font-medium">Apply 20% restocking fee</span>
                 {refundRestockingFee && (
                   <span className="text-xs text-gray-400 ml-auto">
-                    Fee retained: ${(refundTotal * 0.2).toFixed(2)} · Refund to customer: ${(refundTotal * 0.8).toFixed(2)}
+                    Fee retained: ${(refundPreview.due * 0.2).toFixed(2)} · Refund to customer: ${(refundPreview.due * 0.8).toFixed(2)}
                   </span>
                 )}
               </label>
@@ -2619,8 +2652,16 @@ export default function OrdersPage() {
                   {refundRestockingFee && ' — after 20% fee'}
                 </p>
                 <p className="text-2xl font-bold text-orange-400">
-                  ${(refundRestockingFee ? refundTotal * 0.8 : refundTotal).toFixed(2)}
+                  ${(refundRestockingFee ? refundPreview.due * 0.8 : refundPreview.due).toFixed(2)}
                 </p>
+                {refundTotal > 0 && refundPreview.due < refundTotal - 0.005 && (
+                  <p className="text-xs text-gray-400 mt-1 max-w-md">
+                    {refundPreview.due > 0
+                      ? `Items worth $${refundTotal.toFixed(2)}, $${refundPreview.paid.toFixed(2)} paid on this order, so only what was paid for them comes back.`
+                      : `Items worth $${refundTotal.toFixed(2)} come off what they owe, so no money comes back.`}
+                    {refundPreview.owing > 0.005 && ` $${refundPreview.owing.toFixed(2)} still owing on what they're keeping.`}
+                  </p>
+                )}
               </div>
               <div className="flex gap-3">
                 <button
@@ -3153,6 +3194,13 @@ export default function OrdersPage() {
                 <span>Total Refunded</span>
                 <span>${completedRefund.refund.refundAmount.toFixed(2)}</span>
               </div>
+              {!/RESTOCK FEE/.test(completedRefund.refund.reasonText || '') &&
+                completedRefund.refund.refundAmount <
+                  completedRefund.refund.items.reduce((s: number, i: any) => s + i.amount, 0) - 0.005 && (
+                  <p className="text-xs text-gray-600 mt-2">
+                    The order wasn't fully paid, so only what was paid for these items is refunded.
+                  </p>
+                )}
               <p className="text-xs text-gray-600 mt-2">
                 {completedRefund.refund.isFullRefund
                   ? 'This order has been fully refunded.'

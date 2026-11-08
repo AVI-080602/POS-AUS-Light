@@ -46,6 +46,7 @@ export class OrdersController {
     @Query('dateTo') dateTo?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @CurrentUser() user?: any,
   ) {
     const { orders, total } = await this.ordersService.findAll({
       status: status as any,
@@ -58,6 +59,8 @@ export class OrdersController {
       dateTo: dateTo ? new Date(dateTo) : undefined,
       page,
       limit,
+      // Voided sales are for admins only (Sally, 7 Nov 2026).
+      hideVoided: user?.role?.name !== RoleNames.ADMIN,
     });
 
     // Batch-detect which orders on this page were exchanged (i.e. have
@@ -158,9 +161,9 @@ export class OrdersController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get order by ID' })
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  async findOne(@Param('id', ParseIntPipe) id: number, @CurrentUser() user?: any) {
     const order = await this.ordersService.findById(id);
-    if (!order) {
+    if (!order || (order.voidedAt && user?.role?.name !== RoleNames.ADMIN)) {
       return {
         success: false,
         error: { code: 'NOT_FOUND', message: 'Order not found' },

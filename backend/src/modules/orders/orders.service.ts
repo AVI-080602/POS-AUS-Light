@@ -979,6 +979,7 @@ export class OrdersService {
     dateTo?: Date;
     page?: number;
     limit?: number;
+    hideVoided?: boolean;
   }): Promise<{ orders: Order[]; total: number }> {
     const {
       status,
@@ -991,6 +992,7 @@ export class OrdersService {
       dateTo,
       page = 1,
       limit = 20,
+      hideVoided,
     } = options || {};
 
     const query = this.orderRepository
@@ -1070,6 +1072,10 @@ export class OrdersService {
 
     if (dateTo) {
       query.andWhere('order.createdAt <= :dateTo', { dateTo });
+    }
+
+    if (hideVoided) {
+      query.andWhere('order.voidedAt IS NULL');
     }
 
     const [orders, total] = await query
@@ -2000,7 +2006,16 @@ export class OrdersService {
     if (!order) throw new BadRequestException('Order not found');
     const grandTotal = Number(order.grandTotal);
     const paid = await this.sumPaidForOrder(orderId);
-    const balance = Math.max(0, Math.round((grandTotal - paid) * 100) / 100);
+    // A customer only owes for what they're keeping (Sally, 7 Nov 2026).
+    const [r] = await this.dataSource.query(
+      `SELECT (SELECT COALESCE(SUM(refund_amount), 0) FROM refunds WHERE order_id = ?) refunded,
+              (SELECT COALESCE(SUM(ri.amount), 0) FROM refund_items ri
+                 JOIN refunds rf ON rf.id = ri.refund_id WHERE rf.order_id = ?) returned`,
+      [orderId, orderId],
+    );
+    const keeping = Math.max(0, grandTotal - Number(r.returned));
+    const netPaid = Math.max(0, paid - Number(r.refunded));
+    const balance = Math.max(0, Math.round((keeping - netPaid) * 100) / 100);
     return { grandTotal, paid, balance };
   }
 
@@ -2047,6 +2062,8 @@ export class OrdersService {
       OrderStatus.PENDING,
       OrderStatus.PROCESSING,
       OrderStatus.COMPLETE,
+      // Part of a part-paid order came back; they still owe for the rest.
+      OrderStatus.REFUND_IN_PROCESS,
     ]);
     if (!isLaybyOrder && !payableStatuses.has(order.status)) {
       throw new BadRequestException(
@@ -2113,17 +2130,7 @@ export class OrdersService {
       }
 
       // Check if the order is now fully paid.
-      const newPaid = await queryRunner.manager
-        .createQueryBuilder(Payment, 'p')
-        .where('p.orderId = :orderId', { orderId: order.id })
-        .andWhere('p.status = :status', {
-          status: PaymentEntityStatus.COMPLETED,
-        })
-        .select('COALESCE(SUM(p.amount), 0)', 'total')
-        .getRawOne();
-      const paidTotal = Number(newPaid?.total || 0);
-      const grandTotal = Number(order.grandTotal);
-      const isFullyPaid = paidTotal + 0.01 >= grandTotal;
+      const isFullyPaid = toApply + 0.01 >= balance;
 
       // Backorder orders can't complete until every backorder line is
       // fulfilled (stock has arrived). They just go to PAID.
@@ -2133,7 +2140,7 @@ export class OrdersService {
 
       if (isFullyPaid) {
         order.paymentStatus = PaymentStatus.PAID;
-        if (!hasOutstandingBackorder) {
+        if (!hasOutstandingBackorder && order.status !== OrderStatus.REFUND_IN_PROCESS) {
           order.status = OrderStatus.COMPLETE;
         }
       } else {
