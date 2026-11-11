@@ -161,6 +161,15 @@ export class ReportsController {
     return { success: true, data: await this.reportsService.markPurchaseOrder(body, user) };
   }
 
+  // Tick lines and Complete them (Sally, 11 Nov 2026) — the same people who
+  // raise POs.
+  @Post('backorders/complete')
+  @Roles(RoleNames.ADMIN, RoleNames.MANAGER, RoleNames.PRICE_MATCH)
+  @ApiOperation({ summary: 'Take ticked lines off back order, as the order screen does (no stock or money change)' })
+  async completeBackorderLines(@Body() body: { lineIds?: number[] }, @CurrentUser() user: any) {
+    return { success: true, data: await this.reportsService.completeBackorderLines(body || {}, user) };
+  }
+
   // Supplier names for the pickers — every staff member (custom items at
   // the till need one).
   @Get('suppliers')

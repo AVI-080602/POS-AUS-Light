@@ -421,6 +421,8 @@ export const reportsApi = {
     api.get('/reports/backorders/next-po-number', { params: { supplier } }),
   markPurchaseOrder: (data: { supplier: string; lineIds: number[]; poNumber?: string }) =>
     api.post('/reports/backorders/purchase-orders', data),
+  // Tick lines and Complete them (Sally, 11 Nov 2026).
+  completeBackorderLines: (lineIds: number[]) => api.post('/reports/backorders/complete', { lineIds }),
   // Supplier / brand names (custom items, moving a backorder line).
   supplierNames: () => api.get('/reports/suppliers'),
   setBackorderSupplier: (lineId: number, supplier: string) =>

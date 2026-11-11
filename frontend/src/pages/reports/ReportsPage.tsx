@@ -1014,6 +1014,59 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
     }
   };
 
+  // Complete the ticked lines of one supplier (Sally, 11 Nov 2026: stock
+  // came in but the lines were never marked, so they pile up here). Same
+  // as the order screen: POS lines become Complete (taken), website lines
+  // Complete. Nothing happens with no lines ticked.
+  const [completing, setCompleting] = useState<string | null>(null);
+  const completeLines = async (g: BoGroup) => {
+    const lines = g.lines.filter((l) => selected.has(l.lineId));
+    if (lines.length === 0) {
+      toast('Tick the lines to take off back orders first');
+      return;
+    }
+    const web = lines.filter((l) => l.source === 'magento').length;
+    const pos = lines.length - web;
+    const orders = new Set(lines.map((l) => l.orderId)).size;
+    const what = [pos ? `${pos} in-store` : '', web ? `${web} website` : ''].filter(Boolean).join(' and ');
+    if (!window.confirm(
+      `Complete ${lines.length} ${g.supplier} line${lines.length === 1 ? '' : 's'} (${what}, on ${orders} order${orders === 1 ? '' : 's'})?\n\n` +
+      'They come off Back Orders, the same as Complete on the order screen. Stock and payments don\'t change, ' +
+      'an order with money still owing stays open for payment, and each order\'s history shows who did it.',
+    )) return;
+    setCompleting(g.supplier);
+    try {
+      const res = await reportsApi.completeBackorderLines(lines.map((l) => l.lineId));
+      const r = res.data?.data || {};
+      const failed: Array<{ lineId: number; orderNumber: string; sku: string; reason: string }> = r.failed || [];
+      if (r.completed) {
+        toast.success(`${r.completed} line${r.completed === 1 ? '' : 's'} completed on ${r.orders} order${r.orders === 1 ? '' : 's'}`);
+      }
+      if (r.alreadyClosed) {
+        toast(`${r.alreadyClosed} line${r.alreadyClosed === 1 ? ' was' : 's were'} already off back order`);
+      }
+      if (failed.length) {
+        toast.error(
+          `${failed.length} not completed: ` +
+            failed.slice(0, 3).map((f) => `${f.orderNumber} ${f.sku} — ${f.reason}`).join('; ') +
+            (failed.length > 3 ? '…' : ''),
+          { duration: 10000 },
+        );
+      }
+      setSelected((prev) => {
+        const next = new Set(prev);
+        lines.forEach((l) => next.delete(l.lineId));
+        failed.forEach((f) => next.add(f.lineId)); // left ticked to try again
+        return next;
+      });
+      reload();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setCompleting(null);
+    }
+  };
+
   const unorder = async (l: BoLine) => {
     if (!window.confirm(
       `Take ${l.qty}× ${l.sku} (${l.orderNumber}) off PO ${l.poNumber}?\n\n` +
@@ -1040,7 +1093,7 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
                 className="w-4 h-4"
                 checked={selected.has(r.lineId)}
                 onChange={() => toggle(r.lineId)}
-                title="Include in the purchase order"
+                title="Tick to put on a PO, or to Complete"
               />
             ),
           } as Col<BoLine>,
@@ -1196,6 +1249,15 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
             <button type="button" className="btn-primary btn-sm" onClick={() => startPo(g)}>
               Create PO{ticked ? ` (${ticked})` : ''}
             </button>
+            <button
+              type="button"
+              className="btn btn-sm bg-green-600 hover:bg-green-700 text-white disabled:opacity-50"
+              disabled={!ticked || completing !== null}
+              title={ticked ? 'Take the ticked lines off back orders' : 'Tick the lines to take off back orders'}
+              onClick={() => completeLines(g)}
+            >
+              {completing === g.supplier ? 'Completing…' : `Complete${ticked ? ` (${ticked})` : ''}`}
+            </button>
           </span>
         )}
       </div>
@@ -1339,7 +1401,8 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
               <>
                 {' '}To order from a supplier: tick the lines (or tick none to take everything not ordered yet), click Create PO,
                 then download / print it and click Mark as sent — the lines show the PO number and each customer's order gets an
-                internal note.
+                internal note. To clear lines that have been dealt with, tick them and click Complete: they come off this list, the
+                same as Complete on the order screen. Stock and payments don't change.
               </>
             )}
           </Note>

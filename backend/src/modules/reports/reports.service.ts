@@ -8,6 +8,7 @@ import { User } from '../users/entities/user.entity';
 import { cleanSupplierName, ALWAYS_LISTED_SUPPLIERS } from './supplier-name';
 import { Product } from '../products/entities/product.entity';
 import { TradeDiscountsService } from '../products/trade-discounts.service';
+import { OrdersService } from '../orders/orders.service';
 
 // ---------------------------------------------------------------------
 // Reporting (Sally, Oct 2026). All money is GST-inclusive as stored
@@ -50,6 +51,7 @@ export class ReportsService {
     @InjectRepository(DayClose)
     private readonly dayCloseRepo: Repository<DayClose>,
     private readonly tradeDiscounts: TradeDiscountsService,
+    private readonly orders: OrdersService,
   ) {}
 
   // ------------------------------------------------------------ helpers
@@ -1036,6 +1038,76 @@ export class ReportsService {
       );
       return { lineId, poNumber: line.poNumber };
     });
+  }
+
+  // Complete ticked back-order lines from the report (Sally, 11 Nov 2026:
+  // stock comes in but nobody marks it, so old lines pile up — "highlight
+  // the orders that we want to close and just have a button ... hit
+  // complete", "especially with the magento ones"). Each line goes through
+  // what staff already do on the order screen: a POS line gets "Complete
+  // (taken)" from its status drop-down, a website line gets its Complete
+  // button. Stock and payments don't change; an order that still owes
+  // money stays open for payment; each order's history says who did it.
+  // One line failing doesn't stop the rest.
+  async completeBackorderLines(
+    input: { lineIds?: unknown },
+    user: { id: number },
+  ): Promise<{
+    completed: number;
+    orders: number;
+    alreadyClosed: number;
+    failed: Array<{ lineId: number; orderNumber: string; sku: string; reason: string }>;
+  }> {
+    const lineIds = [
+      ...new Set(
+        (Array.isArray(input?.lineIds) ? input.lineIds : [])
+          .map((v) => Number(v))
+          .filter((v) => Number.isInteger(v) && v > 0),
+      ),
+    ];
+    if (lineIds.length === 0) throw new BadRequestException('Tick at least one back order line');
+    if (lineIds.length > 1000) throw new BadRequestException('Too many lines at once — do 1,000 or fewer');
+
+    // The same "open" test as the report, so only lines it shows are touched.
+    const rows: Array<{ id: number; orderId: number; sku: string; orderNumber: string; source: string }> =
+      await this.dataSource.query(
+        `SELECT oi.id, oi.order_id orderId, oi.sku, o.order_number orderNumber, o.source
+           FROM order_items oi
+           JOIN orders o ON o.id = oi.order_id
+           LEFT JOIN (SELECT order_item_id, SUM(quantity) q FROM refund_items GROUP BY order_item_id) rq
+             ON rq.order_item_id = oi.id
+          WHERE oi.id IN (?) AND oi.is_backorder = 1 AND oi.backorder_fulfilled_at IS NULL
+            AND o.status NOT IN ('cancelled', 'refunded', 'layby_expired')
+            AND oi.quantity - COALESCE(rq.q, 0) > 0
+          ORDER BY oi.order_id, oi.id`,
+        [lineIds],
+      );
+
+    const failed: Array<{ lineId: number; orderNumber: string; sku: string; reason: string }> = [];
+    const doneOrders = new Set<number>();
+    let completed = 0;
+    for (const r of rows) {
+      const orderId = Number(r.orderId);
+      const lineId = Number(r.id);
+      try {
+        if (r.source === 'magento') {
+          await this.orders.setWebsiteLineStatus(orderId, lineId, 'complete', undefined, user.id);
+        } else {
+          await this.orders.assertEditable(orderId);
+          await this.orders.setItemStatus(orderId, lineId, 'paid', user.id);
+        }
+        completed++;
+        doneOrders.add(orderId);
+      } catch (e: any) {
+        failed.push({
+          lineId,
+          orderNumber: r.orderNumber,
+          sku: r.sku,
+          reason: String(e?.response?.message || e?.message || 'Could not complete it'),
+        });
+      }
+    }
+    return { completed, orders: doneOrders.size, alreadyClosed: lineIds.length - rows.length, failed };
   }
 
   // ------------------------------------------------------------ original reports
