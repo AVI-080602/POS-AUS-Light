@@ -930,7 +930,18 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
       // storage blocked — filters just won't be remembered
     }
   }, [supplier, from, to, fromTime, toTime, query, poState]);
-  const filtered = !!(from || to || query.trim() || poState !== 'all');
+  // The supplier counts as a filter too, so Clear filters resets it (Sally,
+  // 11 Nov 2026).
+  const filtered = !!(from || to || fromTime || toTime || query.trim() || poState !== 'all' || supplier !== 'all');
+  const clearFilters = () => {
+    setFrom('');
+    setTo('');
+    setFromTime('');
+    setToTime('');
+    setQuery('');
+    setPoState('all');
+    setSupplier('all');
+  };
   const [printing, setPrinting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [poFor, setPoFor] = useState<{ supplier: string; lines: BoLine[] } | null>(null);
@@ -1359,26 +1370,22 @@ function Backorders({ readOnly = false }: { readOnly?: boolean }) {
                 />
               </div>
             </div>
-            {filtered && (
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  setFrom('');
-                  setTo('');
-                  setFromTime('');
-                  setToTime('');
-                  setQuery('');
-                  setPoState('all');
-                }}
-              >
-                Clear filters
-              </button>
-            )}
             {!readOnly && (
               <button className="btn-secondary" onClick={exportAll} disabled={!groups.length}>Export CSV</button>
             )}
             <button className="btn-secondary" onClick={() => setPrinting(true)} disabled={!groups.length}>Print</button>
             <button className="btn-secondary" onClick={reload}>Refresh</button>
+            {/* Always here, after Refresh, so it doesn't appear and push the
+                other buttons along (Sally, 11 Nov 2026: "Could the button
+                be here?"). */}
+            <button
+              className="btn-secondary disabled:opacity-50"
+              onClick={clearFilters}
+              disabled={!filtered}
+              title={filtered ? 'Clear the search, supplier, dates and times' : 'No filters set'}
+            >
+              Clear filters
+            </button>
           </div>
           {groups.length === 0 && (
             <div className="card p-6 text-gray-400">
